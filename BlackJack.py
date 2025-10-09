@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
-import json, random, os, time
+import json, random, os, time, shutil
 from pathlib import Path
 
 # ===============================
@@ -10,15 +10,24 @@ from pathlib import Path
 NUM_MAZZI = 8
 CUT_PERCENT = 0.5
 SALVA_FILE = Path(__file__).parent / "blackjack_save.txt"
-MAX_GIOCATORI_TAVOLO = 5  # umano incluso
+MAX_GIOCATORI_TAVOLO = 5
 MAX_CPU_GLOBALI = 20
 DIFFICOLTA_CPU = ["cauta", "equilibrata", "aggressiva"]
+
+NOMI_REALI = [
+    "John", "Francesco", "Michael", "Luca", "David", "Marco", "James", "Giovanni", "Robert",
+    "Matteo", "William", "Alessandro", "Anthony", "Federico", "Daniel", "Stefano", "Joseph",
+    "Angelo", "Christopher", "Antonio", "Paul", "Mario", "Thomas", "Giorgio", "Andrew",
+    "Riccardo", "Nicholas", "Enrico", "Frank", "Simone", "Alberto", "Christian", "Giuseppe",
+    "Benjamin", "Massimo", "Peter", "Michele", "Leonardo", "Patrick", "Samuel", "Alex",
+    "Diego", "Jacob", "Carlo", "Kevin", "Nathan", "Gabriel", "Edward", "Franco"
+]
 
 SEMI = ['♠', '♥', '♦', '♣']
 VALORI = {str(i): i for i in range(2, 11)} | {'J': 10, 'Q': 10, 'K': 10, 'A': 11}
 
 # ===============================
-# FUNZIONI UTILI
+# UTILITY
 # ===============================
 
 def crea_mazzo():
@@ -53,7 +62,7 @@ def mostra_carte_ascii(mano):
     return "\n".join(righe)
 
 # ===============================
-# CLASSI DI GIOCO
+# CLASSI
 # ===============================
 
 class Mazzo:
@@ -87,7 +96,6 @@ class Giocatore:
         self.puntate = [0]
 
     def decide(self, punteggio):
-        """Logica CPU in base alla difficoltà."""
         if self.difficolta == "cauta":
             soglia = 15
         elif self.difficolta == "aggressiva":
@@ -97,7 +105,7 @@ class Giocatore:
         return punteggio < soglia
 
 # ===============================
-# GESTIONE SALVATAGGIO
+# SALVATAGGIO
 # ===============================
 
 def carica_stato():
@@ -123,7 +131,50 @@ def salva_stato(giocatori, mazzo):
         print(f"⚠️ Errore nel salvataggio: {e}")
 
 # ===============================
-# LOGICA DI GIOCO
+# GRAFICA ASCII DEL TAVOLO
+# ===============================
+
+def mostra_tavolo(giocatori, banco):
+    cols, rows = shutil.get_terminal_size()
+    if cols < 100 or rows < 30:
+        return  # non mostra tavolo se terminale piccolo
+
+    os.system("cls" if os.name == "nt" else "clear")
+    print("=" * 100)
+    print(" " * 40 + "🃏 TAVOLO DA BLACKJACK 🃏")
+    print("=" * 100)
+
+    centro = cols // 2
+
+    # banco in alto
+    print("\n" + " " * (centro - 6) + "Banco")
+    print(" " * (centro - 10) + mostra_carte_ascii(banco).replace("\n", "\n" + " " * (centro - 10)))
+
+    print("\n")
+
+    cpu_sx = [g for g in giocatori if g.cpu][:2]
+    cpu_dx = [g for g in giocatori if g.cpu][2:]
+    umano = next(g for g in giocatori if not g.cpu)
+
+    for g in cpu_sx:
+        print(f"{g.nome} ({g.difficolta}) [{g.saldo}€]")
+        print(mostra_carte_ascii(g.mani[0]))
+        print()
+
+    for g in cpu_dx:
+        print(f"{' ' * (centro + 20)}{g.nome} ({g.difficolta}) [{g.saldo}€]")
+        c = mostra_carte_ascii(g.mani[0]).split("\n")
+        for r in c:
+            print(" " * (centro + 20) + r)
+        print()
+
+    print("\n" + " " * (centro - 8) + f"{umano.nome} [Tu] [{umano.saldo}€]")
+    print(" " * (centro - 12) + mostra_carte_ascii(umano.mani[0]).replace("\n", "\n" + " " * (centro - 12)))
+
+    print("\n" + "=" * 100 + "\n")
+
+# ===============================
+# LOGICA
 # ===============================
 
 def turno_giocatore(mazzo, g, i=0):
@@ -181,24 +232,31 @@ def turno_banco(mazzo, banco):
     return calcola_punteggio(banco)
 
 def gioca_mano(mazzo, giocatori):
-    banco = [mazzo.pesca(), mazzo.pesca()]
-    print("\nCarta scoperta del banco:")
-    print(mostra_carte_ascii([banco[0]]))
-
-    # Puntate iniziali
+    print("\n💰 Fase di puntata:")
     for g in giocatori:
         g.reset()
-        puntata = random.choice([10, 20, 50]) if g.cpu else int(input(f"Puntata per {g.nome} (saldo {g.saldo}): "))
-        g.puntate[0] = min(puntata, g.saldo)
+        if g.cpu:
+            g.puntate[0] = random.choice([10, 20, 50])
+        else:
+            puntata = int(input(f"Puntata per {g.nome} (saldo {g.saldo}): ") or 10)
+            puntata = max(1, min(puntata, g.saldo))
+            g.puntate[0] = puntata
         g.saldo -= g.puntate[0]
+        print(f"{g.nome} punta {g.puntate[0]}€")
+
+    banco = [mazzo.pesca(), mazzo.pesca()]
+    for g in giocatori:
         g.mani[0] = [mazzo.pesca(), mazzo.pesca()]
+
+    mostra_tavolo(giocatori, banco[:1])
 
     for g in giocatori:
         for i in range(len(g.mani)):
             turno_giocatore(mazzo, g, i)
 
     pb = turno_banco(mazzo, banco)
-    print(f"\nBanco ({pb}):\n{mostra_carte_ascii(banco)}")
+    mostra_tavolo(giocatori, banco)
+    print(f"\nBanco ({pb})")
 
     for g in giocatori:
         for i, mano in enumerate(g.mani):
@@ -208,42 +266,25 @@ def gioca_mano(mazzo, giocatori):
                 g.stats["blackjacks"] += 1
             if pg > 21:
                 g.stats["sconfitte"] += 1
-                print(f"{g.nome} sballa!")
             elif pb > 21 or pg > pb:
                 vincita = g.puntate[i]*2
                 g.saldo += vincita
                 g.stats["vittorie"] += 1
                 g.stats["guadagno"] += g.puntate[i]
-                print(f"{g.nome} VINCE! (+{g.puntate[i]}€)")
             elif pg == pb:
                 g.saldo += g.puntate[i]
                 g.stats["pareggi"] += 1
-                print(f"{g.nome} PAREGGIA.")
             else:
                 g.stats["sconfitte"] += 1
                 g.stats["guadagno"] -= g.puntate[i]
-                print(f"{g.nome} perde.")
-
-def mostra_statistiche(giocatori):
-    print("\n===== STATISTICHE =====")
-    for g in giocatori:
-        s = g.stats
-        if s["mani"] == 0: continue
-        wr = s["vittorie"]/s["mani"]*100
-        tipo = f"CPU {g.difficolta}" if g.cpu else "Giocatore"
-        print(f"\n{g.nome} ({tipo}) — Saldo: {g.saldo}€")
-        print(f"Mani: {s['mani']}  Vittorie: {s['vittorie']} ({wr:.1f}%)")
-        print(f"Sconfitte: {s['sconfitte']}  Pareggi: {s['pareggi']}")
-        print(f"Sballi: {s['sballi']}  Blackjacks: {s['blackjacks']}")
-        print(f"Guadagno netto: {s['guadagno']}€")
 
 # ===============================
-# MAIN LOOP
+# MAIN
 # ===============================
 
 def main():
     os.system("cls" if os.name == "nt" else "clear")
-    print("🃏 B L A C K J A C K — Versione 4.0 🃏")
+    print("🃏 B L A C K J A C K 🃏")
 
     stato = carica_stato()
     giocatori_totali = []
@@ -260,14 +301,14 @@ def main():
     else:
         nome = input("Inserisci il tuo nome: ") or "Giocatore"
         giocatori_totali.append(Giocatore(nome))
-        # Pre-crea 20 CPU globali
+        usati = set()
         for i in range(MAX_CPU_GLOBALI):
+            nome_cpu = random.choice([n for n in NOMI_REALI if n not in usati])
+            usati.add(nome_cpu)
             diff = random.choice(DIFFICOLTA_CPU)
-            giocatori_totali.append(Giocatore(f"CPU{i+1}", cpu=True, difficolta=diff))
+            giocatori_totali.append(Giocatore(nome_cpu, cpu=True, difficolta=diff))
 
-    # MAIN LOOP
     while True:
-        # scegli giocatori al tavolo
         umano = next(g for g in giocatori_totali if not g.cpu)
         cpu_candidati = [g for g in giocatori_totali if g.cpu]
         cpu_in_tavolo = random.sample(cpu_candidati, k=random.randint(0, 4))
@@ -278,7 +319,12 @@ def main():
         salva_stato(giocatori_totali, mazzo)
 
         if input("\nVuoi continuare? (s/n) ").lower() != "s":
-            mostra_statistiche(giocatori_totali)
+            print("\nStatistiche finali:")
+            for g in giocatori_totali:
+                if g.stats["mani"] > 0:
+                    wr = g.stats["vittorie"]/g.stats["mani"]*100
+                    tipo = f"CPU {g.difficolta}" if g.cpu else "Giocatore"
+                    print(f"{g.nome} ({tipo}) - Vittorie: {wr:.1f}% | Saldo: {g.saldo}€")
             print("\n💾 Stato salvato. Alla prossima!")
             break
 

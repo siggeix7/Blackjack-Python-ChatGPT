@@ -214,8 +214,13 @@ def scrivi_hof(motivo, giocatori_totali, banco_bankroll):
     with open(HALL_OF_FAME_FILE, "a") as f:
         f.write("\n".join(righe))
 
-def chiudi_partita(motivo, giocatori_totali, banco_bankroll):
+def chiudi_partita(motivo, giocatori_totali, banco_bankroll, save_on_exit=False):
+    # Scrive HOF (fine vera) e opzionalmente salva (di solito no, dato che poi eliminiamo)
     scrivi_hof(motivo, giocatori_totali, banco_bankroll)
+    if save_on_exit:
+        # Non lo useremo per i finali veri, ma lo lascio per completezza
+        try: salva_stato(giocatori_totali, Mazzo(), banco_bankroll)
+        except: pass
     elimina_salvataggio()
     print("\n🏁 Partita terminata.")
     print(f"📜 Hall of Fame aggiornata: {HALL_OF_FAME_FILE.name}")
@@ -465,7 +470,6 @@ def fase_puntate(giocatori, salva_cb):
         if g.saldo <= 0:
             continue
         if g.cpu:
-            # CPU non può puntare più del saldo
             scelte = [x for x in [10, 20, 50] if x <= g.saldo]
             if not scelte:
                 continue
@@ -493,7 +497,7 @@ def applica_risultati_e_bankroll(giocatori, banco_totale, banco_bankroll, salva_
     # Restituisce il bankroll aggiornato del banco
     for g in giocatori:
         for i, mano in enumerate(g.mani):
-            if g.puntate[i] <= 0:   # mano non giocata (saldo 0 prima di puntare)
+            if g.puntate[i] <= 0:
                 continue
             pg = calcola_punteggio(mano)
             g.stats["mani"] += 1
@@ -526,25 +530,23 @@ def applica_risultati_e_bankroll(giocatori, banco_totale, banco_bankroll, salva_
 
 def rimuovi_cpu_senza_soldi(giocatori_totali):
     iniz = len(giocatori_totali)
-    # non rimuovere l'umano; rimuovi CPU a saldo <=0
     restanti = [g for g in giocatori_totali if (not g.cpu) or (g.cpu and g.saldo > 0)]
     rimossi = iniz - len(restanti)
     return restanti, rimossi
 
 def tutti_giocatori_senza_soldi(giocatori_totali):
-    # umano incluso: se tutti hanno saldo <=0 → True
     return all(g.saldo <= 0 for g in giocatori_totali)
 
 def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali, banco_bankroll_ref):
-    # 1) PUNTATE (all-in consentito)
+    # 1) PUNTATE
     fase_puntate(giocatori, salva_cb)
 
-    # 2) DISTRIBUZIONE CON ANIMAZIONE
+    # 2) DISTRIBUZIONE
     banco = []
     print("\n🎬 Distribuzione carte...")
     anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb)
 
-    # 3) TAVOLO INIZIALE (banco coperto ma con totale carta visibile) — pausa
+    # 3) TAVOLO INIZIALE
     mostrato = mostra_tavolo_centrato(giocatori, banco, banco_bankroll_ref[0],
                                       mostra_carta_coperta=True, pausa=True)
     if not mostrato:
@@ -559,7 +561,7 @@ def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali, banco_bankroll_ref)
     print("\n--- Turno del Banco ---")
     pb = turno_banco(mazzo, banco, salva_cb)
 
-    # 6) TAVOLO FINALE (banco scoperto con totale) — pausa
+    # 6) TAVOLO FINALE
     mostra_tavolo_centrato(giocatori, banco, banco_bankroll_ref[0],
                            mostra_carta_coperta=False, pausa=True)
     print(f"Banco ({pb})")
@@ -573,7 +575,7 @@ def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali, banco_bankroll_ref)
 
 def main():
     clear_screen()
-    print("🃏 BLACKJACK MADE BY CHATGPT 🃏")
+    print("🃏 B L A C K J A C K — Versione 4.9 (ASCII, economia & salvataggi corretti) 🃏")
 
     stato = carica_stato()
     giocatori_totali = []
@@ -583,7 +585,7 @@ def main():
             giocatori_totali.append(
                 Giocatore(
                     g.get("nome","Giocatore"),
-                    max(int(g.get("saldo", START_SALDO)), 0),  # forza base ≥ 0
+                    max(int(g.get("saldo", START_SALDO)), 0),
                     g.get("cpu",False),
                     g.get("difficolta","equilibrata"),
                     g.get("stats",None),
@@ -591,10 +593,6 @@ def main():
                     g.get("puntate",[0])
                 )
             )
-        # assicurati che tutti abbiano START_SALDO minimo all'avvio nuovo (solo se salvataggio mancante)
-        for p in giocatori_totali:
-            if "saldo" not in p.__dict__ or p.saldo is None:
-                p.saldo = START_SALDO
         mazzo.mazzo = stato.get("mazzo", crea_mazzo())
         mazzo.usate = stato.get("usate", 0)
         banco_bankroll = stato.get("banco_bankroll", BANCO_START_BANKROLL)
@@ -617,19 +615,18 @@ def main():
 
     # loop partite
     while True:
-        # rimuovi CPU a 0 prima di sedere al tavolo
+        # Rimuovi CPU con saldo 0
         giocatori_totali, rimossi = rimuovi_cpu_senza_soldi(giocatori_totali)
         if rimossi:
             print(f"\n♻️ CPU eliminate per saldo 0: {rimossi}")
 
+        # Se tutti (umano + CPU) a 0 → fine vera (HOF)
         if tutti_giocatori_senza_soldi(giocatori_totali):
             print("\n💀 Tutti i giocatori sono a 0€. Vince il banco.")
             chiudi_partita("Tutti i giocatori a 0€", giocatori_totali, banco_bankroll)
 
         umano = next(g for g in giocatori_totali if not g.cpu)
-        cpu_candidati = [g for g in giocatori_totali if g.cpu]
-        # seleziona fino a 4 CPU con saldo>0
-        cpu_candidati = [c for c in cpu_candidati if c.saldo > 0]
+        cpu_candidati = [g for g in giocatori_totali if g.cpu and g.saldo > 0]
         n_cpu = random.randint(0, min(4, len(cpu_candidati)))
         cpu_in_tavolo = random.sample(cpu_candidati, k=n_cpu)
         giocatori = [umano] + cpu_in_tavolo[:MAX_GIOCATORI_TAVOLO-1]
@@ -642,16 +639,16 @@ def main():
         banco_bankroll = banco_bankroll_ref[0]
         salva_stato(giocatori_totali, mazzo, banco_bankroll)
 
-        # riepilogo saldi dopo la mano
+        # Riepilogo saldi dopo la mano
         print("\n===== RIEPILOGO SALDI DOPO LA MANO =====")
         print(f"💵 Banco: {fmt_euro(banco_bankroll)}")
-        attivi = sorted([g for g in giocatori_totali], key=lambda x: (x.saldo, x.nome), reverse=True)
+        attivi = sorted(giocatori_totali, key=lambda x: (x.saldo, x.nome), reverse=True)
         for g in attivi:
             stato = "" if g.saldo > 0 else " ❌ (eliminato)" if g.cpu else ""
             ruolo = f"CPU {g.difficolta}" if g.cpu else "Tu"
             print(f" - {g.nome} ({ruolo}): {fmt_euro(g.saldo)}{stato}")
 
-        # fine per condizioni
+        # Finali veri (HOF)
         if banco_bankroll <= 0:
             print("\n🏦 Il banco è a 0€! Il gioco termina.")
             chiudi_partita("Banco a 0€", giocatori_totali, banco_bankroll)
@@ -660,15 +657,19 @@ def main():
             print("\n💀 Hai finito i soldi!")
             chiudi_partita("Giocatore a 0€", giocatori_totali, banco_bankroll)
 
+        # Uscita manuale → SALVA e basta (niente HOF)
         if input("\nVuoi continuare? (s/n) ").lower().strip() != "s":
-            print("\nStatistiche finali:")
+            print("\nStatistiche della sessione:")
             finali = sorted(giocatori_totali, key=lambda x: x.saldo, reverse=True)
             for g in finali:
                 if g.stats["mani"] > 0:
                     wr = g.stats["vittorie"]/g.stats["mani"]*100
                     ruolo = f"CPU {g.difficolta}" if g.cpu else "Giocatore"
                     print(f"{g.nome} ({ruolo}) - Vittorie: {wr:.1f}% | Saldo: {fmt_euro(g.saldo)}")
-            chiudi_partita("Partita interrotta dall'utente", giocatori_totali, banco_bankroll)
+            # Salva stato e chiudi SENZA HOF
+            salva_stato(giocatori_totali, mazzo, banco_bankroll)
+            print("\n💾 Partita salvata. Puoi riprendere più tardi.")
+            sys.exit(0)
 
 if __name__ == "__main__":
     main()

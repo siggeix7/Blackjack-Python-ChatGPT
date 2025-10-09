@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import json, random, os, time, shutil
+import json, random, os, time, shutil, base64, sys
 from pathlib import Path
 
 # ===============================
@@ -9,7 +9,7 @@ from pathlib import Path
 
 NUM_MAZZI = 8
 CUT_PERCENT = 0.5
-SALVA_FILE = Path(__file__).parent / "blackjack_save.txt"
+SALVA_FILE = Path(__file__).parent / "blackjack_save.dat"  # cifrato
 MAX_GIOCATORI_TAVOLO = 5         # umano incluso
 MAX_CPU_GLOBALI = 20
 DIFFICOLTA_CPU = ["cauta", "equilibrata", "aggressiva"]
@@ -27,9 +27,15 @@ NOMI_REALI = [
 SEMI = ['♠', '♥', '♦', '♣']
 VALORI = {str(i): i for i in range(2, 11)} | {'J': 10, 'Q': 10, 'K': 10, 'A': 11}
 
+# Chiave semplice per XOR (non condividere, puoi cambiarla)
+SAVE_KEY = "blackjack_secure_key_v1"
+
 # ===============================
-# UTILITY CARTE & PUNTEGGI
+# UTILITY VARIE
 # ===============================
+
+def clear_screen():
+    os.system("cls" if os.name == "nt" else "clear")
 
 def crea_mazzo():
     mazzo = [f"{v}{s}" for v in VALORI for s in SEMI] * NUM_MAZZI
@@ -68,22 +74,32 @@ def mostra_carte_ascii(mano):
 def block_width(text):
     return max(len(r) for r in text.split("\n")) if text else 0
 
+def center_text_line(line, width):
+    pad = max(0, (width - len(line)) // 2)
+    return " " * pad + line
+
 def print_centered_block(text, cols):
-    """
-    Stampa un blocco multiline centrato rispetto alla larghezza del terminale.
-    """
     lines = text.split("\n")
     w = block_width(text)
     pad = max(0, (cols - w) // 2)
     for ln in lines:
         print(" " * pad + ln)
 
-def center_text_line(line, width):
-    pad = max(0, (width - len(line)) // 2)
-    return " " * pad + line
+# ===============================
+# CIFRATURA SALVATAGGIO (Base64 + XOR)
+# ===============================
 
-def clear_screen():
-    os.system("cls" if os.name == "nt" else "clear")
+def encrypt_data(text, key=SAVE_KEY):
+    data = text.encode("utf-8")
+    k = key.encode("utf-8")
+    enc = bytes([b ^ k[i % len(k)] for i, b in enumerate(data)])
+    return base64.b64encode(enc).decode("ascii")
+
+def decrypt_data(encoded, key=SAVE_KEY):
+    raw = base64.b64decode(encoded.encode("ascii"))
+    k = key.encode("utf-8")
+    dec = bytes([b ^ k[i % len(k)] for i, b in enumerate(raw)])
+    return dec.decode("utf-8")
 
 # ===============================
 # CLASSI DI GIOCO
@@ -102,13 +118,13 @@ class Mazzo:
         return self.mazzo.pop()
 
 class Giocatore:
-    def __init__(self, nome, saldo=500, cpu=False, difficolta="equilibrata", stats=None):
+    def __init__(self, nome, saldo=500, cpu=False, difficolta="equilibrata", stats=None, mani=None, puntate=None):
         self.nome = nome
         self.saldo = saldo
         self.cpu = cpu
         self.difficolta = difficolta
-        self.mani = [[]]      # lista di mani (per split)
-        self.puntate = [0]    # puntata per mano
+        self.mani = mani if mani is not None else [[]]      # lista di mani (per split)
+        self.puntate = puntate if puntate is not None else [0]    # puntata per mano
         self.stats = stats or {
             "mani": 0, "vittorie": 0, "sconfitte": 0,
             "pareggi": 0, "sballi": 0, "blackjacks": 0, "guadagno": 0
@@ -126,30 +142,70 @@ class Giocatore:
         return punteggio < soglia
 
 # ===============================
-# SALVATAGGIO
+# SALVATAGGIO (cifrato) — lettura/scrittura CONTINUA
 # ===============================
+
+def snapshot(giocatori, mazzo):
+    return {
+        "giocatori": [g.__dict__ for g in giocatori],
+        "mazzo": mazzo.mazzo,
+        "usate": mazzo.usate
+    }
+
+def salva_stato(giocatori, mazzo):
+    try:
+        data = json.dumps(snapshot(giocatori, mazzo))
+        enc = encrypt_data(data)
+        with open(SALVA_FILE, "w") as f:
+            f.write(enc)
+    except Exception as e:
+        print(f"⚠️ Errore nel salvataggio: {e}")
 
 def carica_stato():
     if not SALVA_FILE.exists():
         return None
     try:
         with open(SALVA_FILE, "r") as f:
-            return json.load(f)
+            enc = f.read().strip()
+            if not enc:
+                return None
+            data = decrypt_data(enc)
+            obj = json.loads(data)
+            return obj
     except Exception:
-        print("⚠️ File di salvataggio corrotto. Verrà ricreato.")
+        print("⚠️ Salvataggio non leggibile, verrà ricreato.")
+        try:
+            SALVA_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
         return None
 
-def salva_stato(giocatori, mazzo):
+def elimina_salvataggio():
     try:
-        stato = {
-            "giocatori": [g.__dict__ for g in giocatori],
-            "mazzo": mazzo.mazzo,
-            "usate": mazzo.usate
-        }
-        with open(SALVA_FILE, "w") as f:
-            json.dump(stato, f)
-    except Exception as e:
-        print(f"⚠️ Errore nel salvataggio: {e}")
+        SALVA_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+# ===============================
+# CONTROLLI DISPONIBILITÀ AZIONI (DOUBLE / SPLIT)
+# ===============================
+
+def check_double(g, i):
+    if len(g.mani[i]) != 2:
+        return False, "Puoi raddoppiare solo con esattamente 2 carte."
+    if g.saldo < g.puntate[i]:
+        return False, "Saldo insufficiente per raddoppiare."
+    return True, ""
+
+def check_split(g, i):
+    mano = g.mani[i]
+    if len(mano) != 2:
+        return False, "Puoi dividere solo con esattamente 2 carte."
+    if mano[0][:-1] != mano[1][:-1]:
+        return False, "Le due carte devono avere lo stesso valore."
+    if g.saldo < g.puntate[i]:
+        return False, "Saldo insufficiente per dividere."
+    return True, ""
 
 # ===============================
 # GRAFICA TAVOLO (CENTRATA, CON PUNTATE, SPLIT ADATTIVO)
@@ -160,32 +216,21 @@ def tavolo_grande_abbastanza():
     return cols >= 100 and rows >= 30, cols, rows
 
 def render_hand_block_with_bet(mano, puntata):
-    """
-    Ritorna un blocco multiline (string) con le carte affiancate
-    e una riga 'Puntata: XX€' centrata sotto.
-    """
     cards = mostra_carte_ascii(mano)
     width = block_width(cards)
     bet_line = center_text_line(f"Puntata: {puntata}€", width)
     return cards + "\n" + bet_line
 
-def combine_blocks_horizontally(blocks, spacing=4):
-    """
-    Unisce N blocchi multiline su una sola riga (se possibile).
-    Restituisce (combined_text, total_width).
-    """
+def combine_blocks_horizontally(blocks, spacing=6):
     split_blocks = [b.split("\n") for b in blocks]
     height = max(len(b) for b in split_blocks)
-    # normalizza altezze
     for b in split_blocks:
         while len(b) < height:
             b.append("")
-    # calcola larghezze
     widths = [max(len(line) for line in b) for b in split_blocks]
     padded_blocks = []
     for b, w in zip(split_blocks, widths):
         padded_blocks.append([line + " " * (w - len(line)) for line in b])
-    # merge
     merged_lines = []
     for r in range(height):
         row = (" " * spacing).join(pb[r] for pb in padded_blocks)
@@ -195,23 +240,16 @@ def combine_blocks_horizontally(blocks, spacing=4):
     return combined, total_w
 
 def mostra_giocatore_blocchi(giocatore, cols):
-    """
-    Mostra (centrato) il giocatore con una o più mani.
-    Se le mani affiancate superano lo spazio, va a capo automaticamente.
-    """
     header = f"{giocatore.nome} ({'CPU ' + giocatore.difficolta if giocatore.cpu else 'Tu'}) [{giocatore.saldo}€]"
     print(center_text_line(header, cols))
-    # costruisci blocchi mano+puntata
     hand_blocks = [render_hand_block_with_bet(m, p) for m, p in zip(giocatore.mani, giocatore.puntate)]
     if len(hand_blocks) == 1:
         print_centered_block(hand_blocks[0], cols)
         return
-    # prova layout orizzontale
     combined, width = combine_blocks_horizontally(hand_blocks, spacing=6)
     if width + 4 <= cols:
         print_centered_block(combined, cols)
     else:
-        # stampa una per riga (verticale)
         for hb in hand_blocks:
             print_centered_block(hb, cols)
             print()
@@ -227,32 +265,24 @@ def mostra_tavolo_centrato(giocatori, banco, mostra_carta_coperta=True, pausa=Tr
     print(center_text_line(titolo, cols))
     print(fascia)
 
-    # Banco TOP-CENTER
     print()
     print(center_text_line("Banco", cols))
     mano_banco = [banco[0]] if mostra_carta_coperta and len(banco) >= 1 else banco
     print_centered_block(render_hand_block_with_bet(mano_banco, 0).replace("Puntata: 0€", " "), cols)
-
     print()
 
-    # Umano bottom-center, CPU attorno
     umano = next(g for g in giocatori if not g.cpu)
     cpu = [g for g in giocatori if g.cpu]
-    # Heuristica: mostra prima due CPU a sinistra (in alto), poi altre a destra, poi umano
     cpu_sx = cpu[:2]
     cpu_dx = cpu[2:]
 
-    # Lato sinistro (stile "upper-left" centrato a blocchi)
     for g in cpu_sx:
         mostra_giocatore_blocchi(g, cols)
         print()
-
-    # Lato destro
     for g in cpu_dx:
         mostra_giocatore_blocchi(g, cols)
         print()
 
-    # Umano
     mostra_giocatore_blocchi(umano, cols)
 
     print("\n" + fascia + "\n")
@@ -264,29 +294,29 @@ def mostra_tavolo_centrato(giocatori, banco, mostra_carta_coperta=True, pausa=Tr
 # ANIMAZIONI (COMPATIBILI)
 # ===============================
 
-def anim_distribuzione_mano_iniziale(mazzo, giocatori, banco):
-    """
-    Prima tutti hanno puntato.
-    1 carta a ciascun giocatore, 1 al banco, poi seconda tornata.
-    """
+def anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb):
     # Primo giro
     for g in giocatori:
         print(f"→ Distribuisco a {g.nome}...")
         g.mani[0].append(mazzo.pesca())
+        salva_cb()  # salvataggio continuo
         print(mostra_carte_ascii(g.mani[0]))
         time.sleep(0.45)
     print("→ Distribuisco al Banco...")
     banco.append(mazzo.pesca())
+    salva_cb()
     print(mostra_carte_ascii([banco[0]]))
     time.sleep(0.55)
     # Secondo giro
     for g in giocatori:
         print(f"→ Distribuisco a {g.nome}...")
         g.mani[0].append(mazzo.pesca())
+        salva_cb()
         print(mostra_carte_ascii(g.mani[0]))
         time.sleep(0.45)
     print("→ Distribuisco al Banco...")
     banco.append(mazzo.pesca())
+    salva_cb()
     print(mostra_carte_ascii(banco))
     time.sleep(0.6)
 
@@ -294,7 +324,14 @@ def anim_distribuzione_mano_iniziale(mazzo, giocatori, banco):
 # LOGICA DI GIOCO
 # ===============================
 
-def turno_giocatore(mazzo, g, i=0):
+def controllo_saldo_zero(giocatori_totali):
+    umano = next(g for g in giocatori_totali if not g.cpu)
+    if umano.saldo <= 0:
+        print("\n💀 Hai finito i soldi. Il salvataggio verrà eliminato.")
+        elimina_salvataggio()
+        sys.exit(0)
+
+def turno_giocatore(mazzo, g, i, salva_cb):
     mano = g.mani[i]
     while True:
         print(f"\n{g.nome} — Mano {i+1} ({'CPU ' + g.difficolta if g.cpu else 'Giocatore'})")
@@ -305,6 +342,7 @@ def turno_giocatore(mazzo, g, i=0):
         if tot > 21:
             print("💥 Sballato!")
             g.stats["sballi"] += 1
+            salva_cb()
             return
 
         if g.cpu:
@@ -312,22 +350,37 @@ def turno_giocatore(mazzo, g, i=0):
             if g.decide(tot):
                 print(f"{g.nome} pesca.")
                 mano.append(mazzo.pesca())
+                salva_cb()
             else:
                 print(f"{g.nome} sta.")
                 return
         else:
-            opzioni = "[C]arta / [S]tai / [R]addoppia / [D]ividi > "
-            sc = input(opzioni).lower().strip()
+            # Determina azioni disponibili e motivazioni
+            can_dbl, why_dbl = check_double(g, i)
+            can_spl, why_spl = check_split(g, i)
+            opzioni = ["[C]arta", "[S]tai"]
+            if can_dbl: opzioni.append("[R]addoppia")
+            if can_spl: opzioni.append("[D]ividi")
+            sc = input(f"{', '.join(opzioni)} > ").lower().strip()
+
             if sc == "c":
                 mano.append(mazzo.pesca())
+                salva_cb()
             elif sc == "s":
                 return
-            elif sc == "r" and len(mano) == 2 and g.saldo >= g.puntate[i]:
+            elif sc == "r":
+                if not can_dbl:
+                    print(f"⛔ Non puoi raddoppiare: {why_dbl}")
+                    continue
                 g.saldo -= g.puntate[i]
                 g.puntate[i] *= 2
                 mano.append(mazzo.pesca())
+                salva_cb()
                 return
-            elif sc == "d" and len(mano) == 2 and mano[0][:-1] == mano[1][:-1] and g.saldo >= g.puntate[i]:
+            elif sc == "d":
+                if not can_spl:
+                    print(f"⛔ Non puoi dividere: {why_spl}")
+                    continue
                 c2 = mano.pop()
                 g.mani.append([c2])
                 g.puntate.append(g.puntate[i])
@@ -335,22 +388,24 @@ def turno_giocatore(mazzo, g, i=0):
                 mano.append(mazzo.pesca())
                 g.mani[-1].append(mazzo.pesca())
                 print("✂️ Mano divisa!")
-                # Gioca ciascuna mano appena creata/adattata
+                salva_cb()
+                # Gioca ciascuna mano
                 for j in range(len(g.mani)):
-                    turno_giocatore(mazzo, g, j)
+                    turno_giocatore(mazzo, g, j, salva_cb)
                 return
             else:
                 print("Scelta non valida.")
 
-def turno_banco(mazzo, banco):
+def turno_banco(mazzo, banco, salva_cb):
     while calcola_punteggio(banco) < 17:
         banco.append(mazzo.pesca())
+        salva_cb()
         print("\nBanco pesca...")
         print(mostra_carte_ascii(banco))
         time.sleep(0.65)
     return calcola_punteggio(banco)
 
-def fase_puntate(giocatori):
+def fase_puntate(giocatori, salva_cb):
     print("\n💰 Fase di puntata:")
     for g in giocatori:
         g.reset()
@@ -373,16 +428,18 @@ def fase_puntate(giocatori):
                 except ValueError:
                     print("Inserisci un numero valido.")
         g.saldo -= g.puntate[0]
+        salva_cb()
         print(f"{g.nome} punta {g.puntate[0]}€")
 
-def gioca_mano(mazzo, giocatori):
+def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali):
     # 1) PUNTATE
-    fase_puntate(giocatori)
+    fase_puntate(giocatori, salva_cb)
+    controllo_saldo_zero(giocatori_totali)
 
     # 2) DISTRIBUZIONE CON ANIMAZIONE
     banco = []
     print("\n🎬 Distribuzione carte...")
-    anim_distribuzione_mano_iniziale(mazzo, giocatori, banco)
+    anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb)
 
     # 3) TAVOLO INIZIALE (banco coperto) — con pausa
     mostrato = mostra_tavolo_centrato(giocatori, banco, mostra_carta_coperta=True, pausa=True)
@@ -392,11 +449,12 @@ def gioca_mano(mazzo, giocatori):
     # 4) TURNI
     for g in giocatori:
         for i in range(len(g.mani)):
-            turno_giocatore(mazzo, g, i)
+            turno_giocatore(mazzo, g, i, salva_cb)
+            controllo_saldo_zero(giocatori_totali)
 
     # 5) BANCO
     print("\n--- Turno del Banco ---")
-    pb = turno_banco(mazzo, banco)
+    pb = turno_banco(mazzo, banco, salva_cb)
 
     # 6) TAVOLO FINALE (banco scoperto) — con pausa
     mostra_tavolo_centrato(giocatori, banco, mostra_carta_coperta=False, pausa=True)
@@ -411,21 +469,24 @@ def gioca_mano(mazzo, giocatori):
                 g.stats["blackjacks"] += 1
             if pg > 21:
                 g.stats["sconfitte"] += 1
-                print(f"{g.nome} sballa.")
+                msg = f"{g.nome} sballa."
             elif pb > 21 or pg > pb:
                 vincita = g.puntate[i] * 2
                 g.saldo += vincita
                 g.stats["vittorie"] += 1
                 g.stats["guadagno"] += g.puntate[i]
-                print(f"{g.nome} VINCE! (+{g.puntate[i]}€)")
+                msg = f"{g.nome} VINCE! (+{g.puntate[i]}€)"
             elif pg == pb:
                 g.saldo += g.puntate[i]
                 g.stats["pareggi"] += 1
-                print(f"{g.nome} PAREGGIA.")
+                msg = f"{g.nome} PAREGGIA."
             else:
                 g.stats["sconfitte"] += 1
                 g.stats["guadagno"] -= g.puntate[i]
-                print(f"{g.nome} perde.")
+                msg = f"{g.nome} perde."
+            print(msg)
+            salva_cb()
+            controllo_saldo_zero(giocatori_totali)
 
 # ===============================
 # MAIN LOOP
@@ -440,10 +501,19 @@ def main():
     mazzo = Mazzo()
 
     if stato:
-        giocatori_totali = [
-            Giocatore(g["nome"], g["saldo"], g["cpu"], g.get("difficolta","equilibrata"), g["stats"])
-            for g in stato.get("giocatori", [])
-        ]
+        # ricostruisci oggetti
+        for g in stato.get("giocatori", []):
+            giocatori_totali.append(
+                Giocatore(
+                    g.get("nome","Giocatore"),
+                    g.get("saldo",500),
+                    g.get("cpu",False),
+                    g.get("difficolta","equilibrata"),
+                    g.get("stats",None),
+                    g.get("mani",[[]]),
+                    g.get("puntate",[0])
+                )
+            )
         mazzo.mazzo = stato.get("mazzo", crea_mazzo())
         mazzo.usate = stato.get("usate", 0)
         print("✅ Stato precedente caricato.")
@@ -454,14 +524,19 @@ def main():
         # CPU pre-create (fino a 20) con nomi reali unici
         usati = set()
         for i in range(MAX_CPU_GLOBALI):
-            disponibili = [n for n in NOMI_REALI if n not in usati]
-            if not disponibili:
-                disponibili = NOMI_REALI[:]  # ricicla se finiscono
+            disponibili = [n for n in NOMI_REALI if n not in usati] or NOMI_REALI[:]
             nome_cpu = random.choice(disponibili)
             usati.add(nome_cpu)
             diff = random.choice(DIFFICOLTA_CPU)
             giocatori_totali.append(Giocatore(nome_cpu, cpu=True, difficolta=diff))
+        # salva SUBITO (salvataggio continuo)
+        salva_stato(giocatori_totali, mazzo)
 
+    # helper per salvataggio continuo
+    def salva_cb():
+        salva_stato(giocatori_totali, mazzo)
+
+    # loop partite
     while True:
         umano = next(g for g in giocatori_totali if not g.cpu)
         cpu_candidati = [g for g in giocatori_totali if g.cpu]
@@ -469,8 +544,9 @@ def main():
         giocatori = [umano] + cpu_in_tavolo[:MAX_GIOCATORI_TAVOLO-1]
 
         print(f"\n🎲 Nuova mano! Partecipanti: {', '.join(g.nome for g in giocatori)}")
-        gioca_mano(mazzo, giocatori)
+        gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali)
         salva_stato(giocatori_totali, mazzo)
+        controllo_saldo_zero(giocatori_totali)
 
         if input("\nVuoi continuare? (s/n) ").lower().strip() != "s":
             print("\nStatistiche finali:")

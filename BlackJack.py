@@ -575,7 +575,7 @@ def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali, banco_bankroll_ref)
 
 def main():
     clear_screen()
-    print("🃏 B L A C K J A C K — Versione 4.9 (ASCII, economia & salvataggi corretti) 🃏")
+    print("🃏 BLACKJACK MADE BY CHATGPT 🃏")
 
     stato = carica_stato()
     giocatori_totali = []

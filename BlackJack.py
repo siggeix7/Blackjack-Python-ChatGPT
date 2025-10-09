@@ -27,7 +27,7 @@ NOMI_REALI = [
 SEMI = ['♠', '♥', '♦', '♣']
 VALORI = {str(i): i for i in range(2, 11)} | {'J': 10, 'Q': 10, 'K': 10, 'A': 11}
 
-# Chiave semplice per XOR (non condividere, puoi cambiarla)
+# Chiave semplice per XOR (puoi cambiarla)
 SAVE_KEY = "blackjack_secure_key_v1"
 
 # ===============================
@@ -208,18 +208,33 @@ def check_split(g, i):
     return True, ""
 
 # ===============================
-# GRAFICA TAVOLO (CENTRATA, CON PUNTATE, SPLIT ADATTIVO)
+# GRAFICA TAVOLO (CENTRATA, CON PUNTATE, PUNTEGGI, SPLIT ADATTIVO)
 # ===============================
 
 def tavolo_grande_abbastanza():
     cols, rows = shutil.get_terminal_size(fallback=(80, 24))
     return cols >= 100 and rows >= 30, cols, rows
 
-def render_hand_block_with_bet(mano, puntata):
+def render_hand_block_with_meta(mano, puntata=None, show_total=True):
+    """
+    Mostra le carte; sotto una riga con 'Puntata: XX€   Totale: YY'.
+    Se puntata è None, mostra solo il totale (se show_total True).
+    """
     cards = mostra_carte_ascii(mano)
     width = block_width(cards)
-    bet_line = center_text_line(f"Puntata: {puntata}€", width)
-    return cards + "\n" + bet_line
+    meta = ""
+    if show_total:
+        tot = calcola_punteggio(mano)
+        if puntata is None:
+            meta = center_text_line(f"Totale: {tot}", width)
+        else:
+            meta = center_text_line(f"Puntata: {puntata}€   Totale: {tot}", width)
+    else:
+        if puntata is not None:
+            meta = center_text_line(f"Puntata: {puntata}€", width)
+        else:
+            meta = " " * max(0, width // 2)  # riga vuota bilanciata
+    return cards + "\n" + meta
 
 def combine_blocks_horizontally(blocks, spacing=6):
     split_blocks = [b.split("\n") for b in blocks]
@@ -242,7 +257,7 @@ def combine_blocks_horizontally(blocks, spacing=6):
 def mostra_giocatore_blocchi(giocatore, cols):
     header = f"{giocatore.nome} ({'CPU ' + giocatore.difficolta if giocatore.cpu else 'Tu'}) [{giocatore.saldo}€]"
     print(center_text_line(header, cols))
-    hand_blocks = [render_hand_block_with_bet(m, p) for m, p in zip(giocatore.mani, giocatore.puntate)]
+    hand_blocks = [render_hand_block_with_meta(m, p, show_total=True) for m, p in zip(giocatore.mani, giocatore.puntate)]
     if len(hand_blocks) == 1:
         print_centered_block(hand_blocks[0], cols)
         return
@@ -267,8 +282,11 @@ def mostra_tavolo_centrato(giocatori, banco, mostra_carta_coperta=True, pausa=Tr
 
     print()
     print(center_text_line("Banco", cols))
-    mano_banco = [banco[0]] if mostra_carta_coperta and len(banco) >= 1 else banco
-    print_centered_block(render_hand_block_with_bet(mano_banco, 0).replace("Puntata: 0€", " "), cols)
+    if mostra_carta_coperta and len(banco) >= 1:
+        # Mostra solo la prima carta del banco, senza totale
+        print_centered_block(render_hand_block_with_meta([banco[0]], puntata=None, show_total=False), cols)
+    else:
+        print_centered_block(render_hand_block_with_meta(banco, puntata=None, show_total=True), cols)
     print()
 
     umano = next(g for g in giocatori if not g.cpu)
@@ -299,7 +317,7 @@ def anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb):
     for g in giocatori:
         print(f"→ Distribuisco a {g.nome}...")
         g.mani[0].append(mazzo.pesca())
-        salva_cb()  # salvataggio continuo
+        salva_cb()
         print(mostra_carte_ascii(g.mani[0]))
         time.sleep(0.45)
     print("→ Distribuisco al Banco...")
@@ -324,15 +342,15 @@ def anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb):
 # LOGICA DI GIOCO
 # ===============================
 
-def controllo_saldo_zero(giocatori_totali):
-    umano = next(g for g in giocatori_totali if not g.cpu)
-    if umano.saldo <= 0:
-        print("\n💀 Hai finito i soldi. Il salvataggio verrà eliminato.")
-        elimina_salvataggio()
-        sys.exit(0)
-
 def turno_giocatore(mazzo, g, i, salva_cb):
     mano = g.mani[i]
+    # blackjack naturale: fermati subito
+    if len(mano) == 2 and calcola_punteggio(mano) == 21:
+        print(f"\n{g.nome} ha Blackjack naturale!")
+        g.stats["blackjacks"] += 1
+        salva_cb()
+        return
+
     while True:
         print(f"\n{g.nome} — Mano {i+1} ({'CPU ' + g.difficolta if g.cpu else 'Giocatore'})")
         print(mostra_carte_ascii(mano))
@@ -351,11 +369,14 @@ def turno_giocatore(mazzo, g, i, salva_cb):
                 print(f"{g.nome} pesca.")
                 mano.append(mazzo.pesca())
                 salva_cb()
+                # se dopo la carta è naturale (impossibile, naturale è solo prime 2) o 21, CPU può fermarsi
+                if calcola_punteggio(mano) >= 21:
+                    return
             else:
                 print(f"{g.nome} sta.")
                 return
         else:
-            # Determina azioni disponibili e motivazioni
+            # Azioni disponibili + spiegazioni
             can_dbl, why_dbl = check_double(g, i)
             can_spl, why_spl = check_split(g, i)
             opzioni = ["[C]arta", "[S]tai"]
@@ -389,7 +410,7 @@ def turno_giocatore(mazzo, g, i, salva_cb):
                 g.mani[-1].append(mazzo.pesca())
                 print("✂️ Mano divisa!")
                 salva_cb()
-                # Gioca ciascuna mano
+                # gioca entrambe le mani
                 for j in range(len(g.mani)):
                     turno_giocatore(mazzo, g, j, salva_cb)
                 return
@@ -397,6 +418,9 @@ def turno_giocatore(mazzo, g, i, salva_cb):
                 print("Scelta non valida.")
 
 def turno_banco(mazzo, banco, salva_cb):
+    # Se banco ha blackjack naturale (21 su 2 carte), non pesca.
+    if len(banco) == 2 and calcola_punteggio(banco) == 21:
+        return 21
     while calcola_punteggio(banco) < 17:
         banco.append(mazzo.pesca())
         salva_cb()
@@ -431,10 +455,16 @@ def fase_puntate(giocatori, salva_cb):
         salva_cb()
         print(f"{g.nome} punta {g.puntate[0]}€")
 
+def elimina_se_utente_a_zero_dopo_risultati(giocatori_totali):
+    umano = next(g for g in giocatori_totali if not g.cpu)
+    if umano.saldo <= 0:
+        print("\n💀 Hai finito i soldi. Il salvataggio verrà eliminato.")
+        elimina_salvataggio()
+        sys.exit(0)
+
 def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali):
-    # 1) PUNTATE
+    # 1) PUNTATE (non eliminiamo se saldo scende a 0: si gioca comunque all-in)
     fase_puntate(giocatori, salva_cb)
-    controllo_saldo_zero(giocatori_totali)
 
     # 2) DISTRIBUZIONE CON ANIMAZIONE
     banco = []
@@ -450,7 +480,6 @@ def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali):
     for g in giocatori:
         for i in range(len(g.mani)):
             turno_giocatore(mazzo, g, i, salva_cb)
-            controllo_saldo_zero(giocatori_totali)
 
     # 5) BANCO
     print("\n--- Turno del Banco ---")
@@ -486,7 +515,9 @@ def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali):
                 msg = f"{g.nome} perde."
             print(msg)
             salva_cb()
-            controllo_saldo_zero(giocatori_totali)
+
+    # 8) Dopo i risultati: se l'umano è a 0, elimina salvataggio ora (non prima)
+    elimina_se_utente_a_zero_dopo_risultati(giocatori_totali)
 
 # ===============================
 # MAIN LOOP
@@ -494,7 +525,7 @@ def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali):
 
 def main():
     clear_screen()
-    print("🃏 B L A C K J A C K 🃏")
+    print("🃏 B L A C K J A C K — Versione 4.6 (ASCII, secure, punteggi sul tavolo) 🃏")
 
     stato = carica_stato()
     giocatori_totali = []
@@ -546,7 +577,6 @@ def main():
         print(f"\n🎲 Nuova mano! Partecipanti: {', '.join(g.nome for g in giocatori)}")
         gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali)
         salva_stato(giocatori_totali, mazzo)
-        controllo_saldo_zero(giocatori_totali)
 
         if input("\nVuoi continuare? (s/n) ").lower().strip() != "s":
             print("\nStatistiche finali:")

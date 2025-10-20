@@ -3,6 +3,9 @@
 import json, random, os, time, shutil, base64, sys
 from pathlib import Path
 from datetime import datetime
+from colorama import Fore, Back, Style, init
+
+init(autoreset=True)  # Inizializza colorama
 
 # ===============================
 # CONFIGURAZIONE
@@ -17,6 +20,7 @@ MAX_CPU_GLOBALI = 20
 DIFFICOLTA_CPU = ["cauta", "equilibrata", "aggressiva"]
 BANCO_START_BANKROLL = 10_000
 START_SALDO = 500
+MAX_SPLIT = 4  # Massimo numero di mani dopo split
 
 # Nomi reali
 NOMI_REALI = [
@@ -54,23 +58,38 @@ def calcola_punteggio(mano):
         assi -= 1
     return tot
 
-def carta_ascii_lines(carta):
+def get_color(seme):
+    return Fore.RED if seme in '♥♦' else Fore.BLACK
+
+def carta_ascii_lines(carta, coperta=False):
+    if coperta:
+        bg = Back.BLUE + Fore.WHITE
+        return [
+            f"{bg}+-----+" + Style.RESET_ALL,
+            f"{bg}|#####|" + Style.RESET_ALL,
+            f"{bg}|#####|" + Style.RESET_ALL,
+            f"{bg}|#####|" + Style.RESET_ALL,
+            f"{bg}+-----+" + Style.RESET_ALL
+        ]
     valore = ''.join(ch for ch in carta if ch not in SEMI)
     seme = ''.join(ch for ch in carta if ch in SEMI)
+    color = get_color(seme)
+    bg = Back.WHITE  # Sfondo bianco per tutte le carte
     return [
-        "+-----+",
-        f"|{valore:<2}   |",
-        f"|  {seme}  |",
-        f"|   {valore:>2}|",
-        "+-----+"
+        f"{bg}{color}+-----+{Style.RESET_ALL}",
+        f"{bg}{color}|{valore:<2}   |{Style.RESET_ALL}",
+        f"{bg}{color}|  {seme}  |{Style.RESET_ALL}",
+        f"{bg}{color}|   {valore:>2}|{Style.RESET_ALL}",
+        f"{bg}{color}+-----+{Style.RESET_ALL}"
     ]
 
-def mostra_carte_ascii(mano):
+def mostra_carte_ascii(mano, coperta=False):
     if not mano:
         return "[vuoto]"
     righe = ["", "", "", "", ""]
-    for c in mano:
-        blocco = carta_ascii_lines(c)
+    carte = mano if not coperta else mano[:-1] + ["COPERTA"]
+    for c in carte:
+        blocco = carta_ascii_lines(c, coperta=(c == "COPERTA"))
         for i in range(5):
             righe[i] += blocco[i] + "  "
     return "\n".join(righe)
@@ -126,21 +145,24 @@ class Mazzo:
 
 class Giocatore:
     def __init__(self, nome, saldo=START_SALDO, cpu=False, difficolta="equilibrata",
-                 stats=None, mani=None, puntate=None):
+                 stats=None, mani=None, puntate=None, assicurazioni=None):
         self.nome = nome
         self.saldo = saldo
         self.cpu = cpu
         self.difficolta = difficolta
         self.mani = mani if mani is not None else [[]]
         self.puntate = puntate if puntate is not None else [0]
+        self.assicurazioni = assicurazioni if assicurazioni is not None else [0]
         self.stats = stats or {
             "mani": 0, "vittorie": 0, "sconfitte": 0,
-            "pareggi": 0, "sballi": 0, "blackjacks": 0, "guadagno": 0
+            "pareggi": 0, "sballi": 0, "blackjacks": 0, "guadagno": 0,
+            "doubles": 0, "splits": 0, "surrenders": 0, "assicurazioni_vinte": 0
         }
     def reset(self):
         self.mani = [[]]
         self.puntate = [0]
-    def decide(self, punteggio):
+        self.assicurazioni = [0]
+    def decide_pesca(self, punteggio):
         if self.difficolta == "cauta":
             soglia = 15
         elif self.difficolta == "aggressiva":
@@ -148,6 +170,32 @@ class Giocatore:
         else:
             soglia = 17
         return punteggio < soglia
+    def decide_double(self, punteggio):
+        if self.difficolta == "cauta":
+            return punteggio in [9, 10, 11]
+        elif self.difficolta == "aggressiva":
+            return punteggio in [8, 9, 10, 11, 12]
+        else:
+            return punteggio in [9, 10, 11]
+    def decide_split(self, valore):
+        if self.difficolta == "cauta":
+            return valore in ['A', '8']
+        elif self.difficolta == "aggressiva":
+            return valore in ['A', '2', '3', '6', '7', '8', '9']
+        else:
+            return valore in ['A', '8', '9']
+    def decide_surrender(self, punteggio):
+        if self.difficolta == "cauta":
+            return punteggio in [15, 16]
+        else:
+            return False
+    def decide_assicurazione(self):
+        if self.difficolta == "cauta":
+            return True
+        elif self.difficolta == "aggressiva":
+            return False
+        else:
+            return random.choice([True, False])
 
 # ===============================
 # STATO & SALVATAGGIO
@@ -215,10 +263,8 @@ def scrivi_hof(motivo, giocatori_totali, banco_bankroll):
         f.write("\n".join(righe))
 
 def chiudi_partita(motivo, giocatori_totali, banco_bankroll, save_on_exit=False):
-    # Scrive HOF (fine vera) e opzionalmente salva (di solito no, dato che poi eliminiamo)
     scrivi_hof(motivo, giocatori_totali, banco_bankroll)
     if save_on_exit:
-        # Non lo useremo per i finali veri, ma lo lascio per completezza
         try: salva_stato(giocatori_totali, Mazzo(), banco_bankroll)
         except: pass
     elimina_salvataggio()
@@ -245,6 +291,8 @@ def check_split(g, i):
         return False, "Le due carte devono avere lo stesso valore."
     if g.saldo < g.puntate[i]:
         return False, "Saldo insufficiente per dividere."
+    if len(g.mani) >= MAX_SPLIT:
+        return False, "Raggiunto limite massimo di split."
     return True, ""
 
 # ===============================
@@ -255,22 +303,19 @@ def tavolo_grande_abbastanza():
     cols, rows = shutil.get_terminal_size(fallback=(80, 24))
     return cols >= 100 and rows >= 30, cols, rows
 
-def render_hand_block_with_meta(mano, puntata=None, show_total=True):
-    cards = mostra_carte_ascii(mano)
+def render_hand_block_with_meta(mano, puntata=None, assicurazione=0, show_total=True, coperta=False):
+    cards = mostra_carte_ascii(mano, coperta=coperta)
     width = block_width(cards)
-    meta = ""
+    meta_lines = []
+    if puntata is not None:
+        meta_lines.append(center_text_line(f"Puntata: {puntata}€", width))
+    if assicurazione > 0:
+        meta_lines.append(center_text_line(f"Assicurazione: {assicurazione}€", width))
     if show_total:
         tot = calcola_punteggio(mano)
-        if puntata is None:
-            meta = center_text_line(f"Totale: {tot}", width)
-        else:
-            meta = center_text_line(f"Puntata: {puntata}€   Totale: {tot}", width)
-    else:
-        if puntata is not None:
-            meta = center_text_line(f"Puntata: {puntata}€", width)
-        else:
-            meta = " " * max(0, width // 2)
-    return cards + "\n" + meta
+        meta_lines.append(center_text_line(f"Totale: {tot}", width))
+    meta = "\n".join(meta_lines)
+    return cards + "\n" + meta if meta else cards
 
 def combine_blocks_horizontally(blocks, spacing=6):
     split_blocks = [b.split("\n") for b in blocks]
@@ -292,7 +337,9 @@ def combine_blocks_horizontally(blocks, spacing=6):
 def mostra_giocatore_blocchi(giocatore, cols):
     header = f"{giocatore.nome} ({'CPU ' + giocatore.difficolta if giocatore.cpu else 'Tu'}) [{fmt_euro(giocatore.saldo)}]"
     print(center_text_line(header, cols))
-    hand_blocks = [render_hand_block_with_meta(m, p, show_total=True) for m, p in zip(giocatore.mani, giocatore.puntate)]
+    hand_blocks = []
+    for i, m in enumerate(giocatore.mani):
+        hand_blocks.append(render_hand_block_with_meta(m, giocatore.puntate[i], giocatore.assicurazioni[i], show_total=True))
     if len(hand_blocks) == 1:
         print_centered_block(hand_blocks[0], cols)
         return
@@ -318,10 +365,7 @@ def mostra_tavolo_centrato(giocatori, banco, banco_bankroll, mostra_carta_copert
     print()
     banco_header = f"Banco [💰 {fmt_euro(banco_bankroll)}]"
     print(center_text_line(banco_header, cols))
-    if mostra_carta_coperta and len(banco) >= 1:
-        print_centered_block(render_hand_block_with_meta([banco[0]], puntata=None, show_total=True), cols)
-    else:
-        print_centered_block(render_hand_block_with_meta(banco, puntata=None, show_total=True), cols)
+    print_centered_block(render_hand_block_with_meta(banco, show_total=not mostra_carta_coperta, coperta=mostra_carta_coperta), cols)
     print()
 
     umano = next(g for g in giocatori if not g.cpu)
@@ -369,7 +413,7 @@ def anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb):
         print(mostra_carte_ascii(g.mani[0]))
         time.sleep(0.45)
     # Seconda carta al banco (NON viene mostrata!)
-    print("→ Distribuisco al Banco...")
+    print("→ Distribuisco al Banco (coperta)...")
     banco.append(mazzo.pesca())
     salva_cb()
     time.sleep(0.6)
@@ -378,9 +422,58 @@ def anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb):
 # LOGICA DI GIOCO
 # ===============================
 
-def turno_giocatore(mazzo, g, i, salva_cb):
+def fase_assicurazione(giocatori, banco, salva_cb, banco_bankroll_ref):
+    if not banco[0].startswith('A'):
+        return False
+    print("\n🛡️ Il banco mostra un Asso! Fase assicurazione.")
+    has_bj = calcola_punteggio(banco) == 21
+    for g in giocatori:
+        for i in range(len(g.mani)):
+            if g.puntate[i] <= 0:
+                continue
+            ass_max = g.puntate[i] // 2
+            if g.saldo < ass_max:
+                ass_max = g.saldo
+            if ass_max <= 0:
+                continue
+            if g.cpu:
+                if g.decide_assicurazione() and g.saldo >= ass_max:
+                    g.assicurazioni[i] = ass_max
+                    g.saldo -= ass_max
+                    print(f"{g.nome} si assicura per {ass_max}€")
+            else:
+                while True:
+                    try:
+                        inp = input(f"{g.nome} (mano {i+1}), assicurazione (max {ass_max}€)? (0-{ass_max}): ") or "0"
+                        ass = int(inp)
+                        if 0 <= ass <= ass_max:
+                            g.assicurazioni[i] = ass
+                            g.saldo -= ass
+                            break
+                        print("Valore non valido.")
+                    except ValueError:
+                        print("Inserisci un numero valido.")
+            salva_cb()
+    # Se banco ha BJ, risolvi assicurazioni subito
+    if has_bj:
+        print("\n📢 Il banco ha Blackjack! Risoluzione assicurazioni.")
+        for g in giocatori:
+            for i in range(len(g.mani)):
+                ass = g.assicurazioni[i]
+                if ass > 0:
+                    if has_bj:
+                        vincita = ass * 2
+                        g.saldo += vincita + ass  # 2:1 + rimborso
+                        g.stats["assicurazioni_vinte"] += 1
+                        banco_bankroll_ref[0] -= vincita
+                        print(f"{g.nome} vince assicurazione: +{vincita}€")
+                    else:
+                        banco_bankroll_ref[0] += ass
+        salva_cb()
+    return has_bj
+
+def turno_giocatore(mazzo, g, i, salva_cb, banco_prima_carta):
     mano = g.mani[i]
-    # blackjack naturale: fermati subito
     if len(mano) == 2 and calcola_punteggio(mano) == 21:
         print(f"\n{g.nome} ha Blackjack naturale!")
         g.stats["blackjacks"] += 1
@@ -399,23 +492,54 @@ def turno_giocatore(mazzo, g, i, salva_cb):
             salva_cb()
             return
 
+        can_dbl, why_dbl = check_double(g, i)
+        can_spl, why_spl = check_split(g, i)
+        can_surr = len(mano) == 2
+
         if g.cpu:
             time.sleep(0.6)
-            if g.decide(tot):
+            valore = mano[0][:-1]
+            if can_surr and g.decide_surrender(tot):
+                print(f"{g.nome} si arrende.")
+                g.stats["surrenders"] += 1
+                g.saldo += g.puntate[i] // 2
+                g.puntate[i] = -g.puntate[i] // 2  # Marca come surrender (perdita metà)
+                salva_cb()
+                return
+            elif can_spl and g.decide_split(valore):
+                c2 = mano.pop()
+                g.mani.append([c2])
+                g.puntate.append(g.puntate[i])
+                g.assicurazioni.append(0)
+                g.saldo -= g.puntate[i]
+                mano.append(mazzo.pesca())
+                g.mani[-1].append(mazzo.pesca())
+                print(f"{g.nome} divide!")
+                g.stats["splits"] += 1
+                salva_cb()
+                # Ricorsivo, ma con limite MAX_SPLIT
+                return  # Uscirà e richiamerà per tutte le mani
+            elif can_dbl and g.decide_double(tot):
+                g.saldo -= g.puntate[i]
+                g.puntate[i] *= 2
+                mano.append(mazzo.pesca())
+                print(f"{g.nome} raddoppia!")
+                g.stats["doubles"] += 1
+                salva_cb()
+                return
+            elif g.decide_pesca(tot):
                 print(f"{g.nome} pesca.")
                 mano.append(mazzo.pesca())
                 salva_cb()
-                if calcola_punteggio(mano) >= 21:
-                    return
+                continue
             else:
                 print(f"{g.nome} sta.")
                 return
         else:
-            can_dbl, why_dbl = check_double(g, i)
-            can_spl, why_spl = check_split(g, i)
             opzioni = ["[C]arta", "[S]tai"]
             if can_dbl: opzioni.append("[R]addoppia")
             if can_spl: opzioni.append("[D]ividi")
+            if can_surr: opzioni.append("[U]rrenditi")
             sc = input(f"{', '.join(opzioni)} > ").lower().strip()
 
             if sc == "c":
@@ -423,35 +547,37 @@ def turno_giocatore(mazzo, g, i, salva_cb):
                 salva_cb()
             elif sc == "s":
                 return
-            elif sc == "r":
-                if not can_dbl:
-                    print(f"⛔ Non puoi raddoppiare: {why_dbl}")
-                    continue
+            elif sc == "r" and can_dbl:
                 g.saldo -= g.puntate[i]
                 g.puntate[i] *= 2
                 mano.append(mazzo.pesca())
+                print("Raddoppiato!")
+                g.stats["doubles"] += 1
                 salva_cb()
                 return
-            elif sc == "d":
-                if not can_spl:
-                    print(f"⛔ Non puoi dividere: {why_spl}")
-                    continue
+            elif sc == "d" and can_spl:
                 c2 = mano.pop()
                 g.mani.append([c2])
                 g.puntate.append(g.puntate[i])
+                g.assicurazioni.append(0)
                 g.saldo -= g.puntate[i]
                 mano.append(mazzo.pesca())
                 g.mani[-1].append(mazzo.pesca())
                 print("✂️ Mano divisa!")
+                g.stats["splits"] += 1
                 salva_cb()
-                for j in range(len(g.mani)):
-                    turno_giocatore(mazzo, g, j, salva_cb)
+                return  # Uscirà e richiamerà per tutte le mani
+            elif sc == "u" and can_surr:
+                print("Ti arrendi.")
+                g.stats["surrenders"] += 1
+                g.saldo += g.puntate[i] // 2
+                g.puntate[i] = -g.puntate[i] // 2  # Marca come surrender
+                salva_cb()
                 return
             else:
-                print("Scelta non valida.")
+                print("Scelta non valida." if sc not in ["c","s","r","d","u"] else f"⛔ Non puoi: {why_dbl or why_spl}")
 
 def turno_banco(mazzo, banco, salva_cb):
-    # Se banco ha blackjack naturale, non pesca
     if len(banco) == 2 and calcola_punteggio(banco) == 21:
         return 21
     while calcola_punteggio(banco) < 17:
@@ -477,13 +603,10 @@ def fase_puntate(giocatori, salva_cb):
         else:
             while True:
                 try:
-                    inp = input(f"Puntata per {g.nome} (saldo {g.saldo}): ") or "10"
+                    inp = input(f"Puntata per {g.nome} (saldo {fmt_euro(g.saldo)}, min 1): ") or "10"
                     puntata = int(inp)
-                    if puntata < 1:
-                        print("La puntata minima è 1.")
-                        continue
-                    if puntata > g.saldo:
-                        print("Non puoi puntare più del saldo.")
+                    if puntata < 1 or puntata > g.saldo:
+                        print("Puntata non valida.")
                         continue
                     g.puntate[0] = puntata
                     break
@@ -493,38 +616,57 @@ def fase_puntate(giocatori, salva_cb):
         salva_cb()
         print(f"{g.nome} punta {g.puntate[0]}€")
 
-def applica_risultati_e_bankroll(giocatori, banco_totale, banco_bankroll, salva_cb):
-    # Restituisce il bankroll aggiornato del banco
+def applica_risultati_e_bankroll(giocatori, banco_totale, banco_bankroll, salva_cb, banco_has_bj):
     for g in giocatori:
         for i, mano in enumerate(g.mani):
-            if g.puntate[i] <= 0:
+            puntata = g.puntate[i]
+            if puntata == 0:
+                continue
+            # Gestisci surrender (puntata negativa)
+            if puntata < 0:
+                banco_bankroll -= puntata  # Banco vince metà (negativo diventa positivo)
+                g.stats["sconfitte"] += 1
+                g.stats["guadagno"] += puntata
+                continue
+            ass = g.assicurazioni[i]
+            if ass > 0 and banco_has_bj:
+                # Già gestito in fase_assicurazione
                 continue
             pg = calcola_punteggio(mano)
             g.stats["mani"] += 1
-            if pg == 21 and len(mano) == 2:
+            is_bj = pg == 21 and len(mano) == 2
+            if is_bj:
                 g.stats["blackjacks"] += 1
 
             if pg > 21:
                 g.stats["sconfitte"] += 1
-                banco_bankroll += g.puntate[i]
-                msg = f"{g.nome} sballa."
+                g.stats["guadagno"] -= puntata
+                banco_bankroll += puntata
+                msg = f"{g.nome} sballa. (-{puntata}€)"
+            elif banco_has_bj:
+                g.stats["sconfitte"] += 1
+                g.stats["guadagno"] -= puntata
+                banco_bankroll += puntata
+                msg = f"{g.nome} perde contro BJ banco. (-{puntata}€)"
             elif banco_totale > 21 or pg > banco_totale:
-                g.saldo += g.puntate[i] * 2
+                multiplier = 1.5 if is_bj else 1
+                vincita = int(puntata * multiplier)
+                g.saldo += puntata + vincita
                 g.stats["vittorie"] += 1
-                g.stats["guadagno"] += g.puntate[i]
-                banco_bankroll -= g.puntate[i]
-                msg = f"{g.nome} VINCE! (+{g.puntate[i]}€)"
+                g.stats["guadagno"] += vincita
+                banco_bankroll -= vincita
+                msg = f"{g.nome} VINCE{' BJ' if is_bj else ''}! (+{vincita}€)"
             elif pg == banco_totale:
-                g.saldo += g.puntate[i]
+                g.saldo += puntata
                 g.stats["pareggi"] += 1
-                msg = f"{g.nome} PAREGGIA."
+                msg = f"{g.nome} PAREGGIA. (+0€)"
             else:
                 g.stats["sconfitte"] += 1
-                g.stats["guadagno"] -= g.puntate[i]
-                banco_bankroll += g.puntate[i]
-                msg = f"{g.nome} perde."
+                g.stats["guadagno"] -= puntata
+                banco_bankroll += puntata
+                msg = f"{g.nome} perde. (-{puntata}€)"
 
-            print(msg)
+            print(f"{Fore.GREEN if 'VINCE' in msg else Fore.YELLOW if 'PAREGGIA' in msg else Fore.RED}{msg}{Style.RESET_ALL}")
             salva_cb()
     return banco_bankroll
 
@@ -537,6 +679,23 @@ def rimuovi_cpu_senza_soldi(giocatori_totali):
 def tutti_giocatori_senza_soldi(giocatori_totali):
     return all(g.saldo <= 0 for g in giocatori_totali)
 
+def mostra_statistiche(giocatori_totali):
+    print("\n📊 Statistiche dettagliate:")
+    for g in sorted(giocatori_totali, key=lambda x: x.saldo, reverse=True):
+        if g.stats["mani"] == 0:
+            continue
+        ruolo = f"CPU {g.difficolta}" if g.cpu else "Giocatore"
+        wr = (g.stats["vittorie"] / g.stats["mani"]) * 100 if g.stats["mani"] > 0 else 0
+        print(f"{g.nome} ({ruolo}):")
+        print(f" - Mani giocate: {g.stats['mani']}")
+        print(f" - Win Rate: {wr:.1f}%")
+        print(f" - Vittorie: {g.stats['vittorie']} | Sconfitte: {g.stats['sconfitte']} | Pareggi: {g.stats['pareggi']}")
+        print(f" - Blackjacks: {g.stats['blackjacks']} | Sballi: {g.stats['sballi']}")
+        print(f" - Doubles: {g.stats['doubles']} | Splits: {g.stats['splits']} | Surrenders: {g.stats['surrenders']}")
+        print(f" - Assicurazioni vinte: {g.stats['assicurazioni_vinte']}")
+        print(f" - Guadagno netto: {fmt_euro(g.stats['guadagno'])}")
+        print()
+
 def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali, banco_bankroll_ref):
     # 1) PUNTATE
     fase_puntate(giocatori, salva_cb)
@@ -546,28 +705,40 @@ def gioca_mano(mazzo, giocatori, salva_cb, giocatori_totali, banco_bankroll_ref)
     print("\n🎬 Distribuzione carte...")
     anim_distribuzione_mano_iniziale(mazzo, giocatori, banco, salva_cb)
 
-    # 3) TAVOLO INIZIALE
-    mostrato = mostra_tavolo_centrato(giocatori, banco, banco_bankroll_ref[0],
-                                      mostra_carta_coperta=True, pausa=True)
+    # 3) CHECK BJ BANCO e ASSICURAZIONE
+    banco_has_bj = fase_assicurazione(giocatori, banco, salva_cb, banco_bankroll_ref)
+    if banco_has_bj:
+        # Risolvi immediatamente se banco ha BJ
+        print("\n--- Risoluzione immediata (Banco BJ) ---")
+        mostra_tavolo_centrato(giocatori, banco, banco_bankroll_ref[0], mostra_carta_coperta=False, pausa=False)
+        banco_bankroll_ref[0] = applica_risultati_e_bankroll(giocatori, 21, banco_bankroll_ref[0], salva_cb, True)
+        return
+
+    # 4) TAVOLO INIZIALE
+    mostrato = mostra_tavolo_centrato(giocatori, banco, banco_bankroll_ref[0], mostra_carta_coperta=True, pausa=True)
     if not mostrato:
         print(f"\n(Modalità compatta: banco {fmt_euro(banco_bankroll_ref[0])})")
 
-    # 4) TURNI
+    # 5) TURNI GIOCATORI
     for g in giocatori:
-        for i in range(len(g.mani)):
-            turno_giocatore(mazzo, g, i, salva_cb)
+        # Turno per ogni mano (gestisce split internamente)
+        i = 0
+        while i < len(g.mani):
+            turno_giocatore(mazzo, g, i, salva_cb, banco[0])
+            i += 1
 
-    # 5) BANCO
+    # 6) BANCO
     print("\n--- Turno del Banco ---")
+    print("Rivelazione carta coperta...")
+    print(mostra_carte_ascii(banco))
     pb = turno_banco(mazzo, banco, salva_cb)
 
-    # 6) TAVOLO FINALE
-    mostra_tavolo_centrato(giocatori, banco, banco_bankroll_ref[0],
-                           mostra_carta_coperta=False, pausa=True)
+    # 7) TAVOLO FINALE
+    mostra_tavolo_centrato(giocatori, banco, banco_bankroll_ref[0], mostra_carta_coperta=False, pausa=True)
     print(f"Banco ({pb})")
 
-    # 7) RISULTATI + bankroll banco
-    banco_bankroll_ref[0] = applica_risultati_e_bankroll(giocatori, pb, banco_bankroll_ref[0], salva_cb)
+    # 8) RISULTATI + bankroll banco
+    banco_bankroll_ref[0] = applica_risultati_e_bankroll(giocatori, pb, banco_bankroll_ref[0], salva_cb, False)
 
 # ===============================
 # MAIN LOOP
@@ -590,7 +761,8 @@ def main():
                     g.get("difficolta","equilibrata"),
                     g.get("stats",None),
                     g.get("mani",[[]]),
-                    g.get("puntate",[0])
+                    g.get("puntate",[0]),
+                    g.get("assicurazioni",[0])
                 )
             )
         mazzo.mazzo = stato.get("mazzo", crea_mazzo())
@@ -657,18 +829,14 @@ def main():
             print("\n💀 Hai finito i soldi!")
             chiudi_partita("Giocatore a 0€", giocatori_totali, banco_bankroll)
 
+        # Mostra statistiche
+        mostra_statistiche(giocatori_totali)
+
         # Uscita manuale → SALVA e basta (niente HOF)
-        if input("\nVuoi continuare? (s/n) ").lower().strip() != "s":
-            print("\nStatistiche della sessione:")
-            finali = sorted(giocatori_totali, key=lambda x: x.saldo, reverse=True)
-            for g in finali:
-                if g.stats["mani"] > 0:
-                    wr = g.stats["vittorie"]/g.stats["mani"]*100
-                    ruolo = f"CPU {g.difficolta}" if g.cpu else "Giocatore"
-                    print(f"{g.nome} ({ruolo}) - Vittorie: {wr:.1f}% | Saldo: {fmt_euro(g.saldo)}")
-            # Salva stato e chiudi SENZA HOF
-            salva_stato(giocatori_totali, mazzo, banco_bankroll)
+        cont = input("\nVuoi continuare? (s/n) ").lower().strip()
+        if cont != "s":
             print("\n💾 Partita salvata. Puoi riprendere più tardi.")
+            salva_stato(giocatori_totali, mazzo, banco_bankroll)
             sys.exit(0)
 
 if __name__ == "__main__":

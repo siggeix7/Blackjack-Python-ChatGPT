@@ -74,20 +74,8 @@ jobs:
           if [[ -n "$release_json" ]]; then
             release_id="$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
           else
-            python3 - "$TAG" "$TITLE" "$GITHUB_SHA" > release-payload.json <<'PY'
-import json
-import sys
-
-tag, title, sha = sys.argv[1:4]
-print(json.dumps({
-    "tag_name": tag,
-    "target_commitish": sha,
-    "name": title,
-    "body": f"APK Android generato automaticamente per il commit {sha}.",
-    "draft": False,
-    "prerelease": False,
-}))
-PY
+            python3 -c 'import json,sys; tag,title,sha=sys.argv[1:4]; print(json.dumps({"tag_name": tag, "target_commitish": sha, "name": title, "body": f"APK Android generato automaticamente per il commit {sha}.", "draft": False, "prerelease": False}))' \
+              "$TAG" "$TITLE" "$GITHUB_SHA" > release-payload.json
             release_id="$(curl -fsS \
               -X POST \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \
@@ -101,17 +89,7 @@ PY
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "${API}/releases/${release_id}/assets")"
-          existing_asset_id="$(printf '%s' "$assets_json" | python3 - "$ASSET_NAME" <<'PY'
-import json
-import sys
-
-name = sys.argv[1]
-for asset in json.load(sys.stdin):
-    if asset.get("name") == name:
-        print(asset["id"])
-        break
-PY
-          )"
+          existing_asset_id="$(printf '%s' "$assets_json" | python3 -c 'import json,sys; name=sys.argv[1]; print(next((str(asset["id"]) for asset in json.load(sys.stdin) if asset.get("name") == name), ""))' "$ASSET_NAME")"
 
           if [[ -n "$existing_asset_id" ]]; then
             curl -fsS \

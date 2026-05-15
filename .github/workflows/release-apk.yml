@@ -54,15 +54,8 @@ jobs:
           printf 'title=%s\n' "Blackjack Royal ${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           printf 'apk=%s\n' "release/${APK_NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: blackjack-royal-apk
-          path: release/*.apk
-          if-no-files-found: error
-
       - name: Publish GitHub Release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,13 +63,68 @@ jobs:
           TAG="${{ steps.release_info.outputs.tag }}"
           TITLE="${{ steps.release_info.outputs.title }}"
           APK="${{ steps.release_info.outputs.apk }}"
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          ASSET_NAME="$(basename "$APK")"
 
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          release_json="$(curl -fsS \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API}/releases/tags/${TAG}" || true)"
+
+          if [[ -n "$release_json" ]]; then
+            release_id="$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
           else
-            gh release create "$TAG" "$APK" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "$TITLE" \
-              --notes "APK Android generato automaticamente per il commit ${GITHUB_SHA}."
+            python3 - "$TAG" "$TITLE" "$GITHUB_SHA" > release-payload.json <<'PY'
+import json
+import sys
+
+tag, title, sha = sys.argv[1:4]
+print(json.dumps({
+    "tag_name": tag,
+    "target_commitish": sha,
+    "name": title,
+    "body": f"APK Android generato automaticamente per il commit {sha}.",
+    "draft": False,
+    "prerelease": False,
+}))
+PY
+            release_id="$(curl -fsS \
+              -X POST \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/json" \
+              --data-binary @release-payload.json \
+              "${API}/releases" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
           fi
+
+          assets_json="$(curl -fsS \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API}/releases/${release_id}/assets")"
+          existing_asset_id="$(printf '%s' "$assets_json" | python3 - "$ASSET_NAME" <<'PY'
+import json
+import sys
+
+name = sys.argv[1]
+for asset in json.load(sys.stdin):
+    if asset.get("name") == name:
+        print(asset["id"])
+        break
+PY
+          )"
+
+          if [[ -n "$existing_asset_id" ]]; then
+            curl -fsS \
+              -X DELETE \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${API}/releases/assets/${existing_asset_id}"
+          fi
+
+          curl -fsS \
+            -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/vnd.android.package-archive" \
+            --data-binary "@${APK}" \
+            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${ASSET_NAME}"

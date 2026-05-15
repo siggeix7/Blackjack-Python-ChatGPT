@@ -1,4 +1,4 @@
-package com.opencode.blackjack;
+package com.siggeix7.blackjack;
 
 import android.app.Activity;
 import android.app.Dialog;

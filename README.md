@@ -13,12 +13,38 @@ python3 BlackJack.py
 
 La versione Android nativa e' nella cartella `android/`. Non richiede Gradle: lo script usa direttamente Android SDK build-tools, `javac`, `d8`, `aapt2`, `zipalign` e `apksigner`.
 
+Guida rapida:
+
+```bash
+git clone git@github.com:siggeix7/Blackjack-Python-ChatGPT.git
+cd Blackjack-Python-ChatGPT/android
+./build-apk.sh
+```
+
+L'APK viene creato in:
+
+```text
+android/build/outputs/blackjack-royal.apk
+```
+
 Requisiti:
 
-- `ANDROID_HOME` impostato verso un Android SDK valido, oppure SDK disponibile in `/tmp/opencode/android-sdk`.
-- Android build-tools `35.0.0`.
-- Platform SDK `android-35`.
-- JDK con `javac`, `jar` e `keytool` nel `PATH`.
+- JDK installato con `javac`, `jar` e `keytool` nel `PATH`.
+- Android SDK installato con Platform SDK `android-35`.
+- Android SDK build-tools `35.0.0`.
+
+Se hai installato Android Studio, di solito lo script trova l'SDK automaticamente in `~/Android/Sdk` su Linux o `~/Library/Android/sdk` su macOS. Se l'SDK e' in un altro percorso, passa `ANDROID_HOME` o `ANDROID_SDK_ROOT`:
+
+```bash
+cd android
+ANDROID_HOME=/percorso/al/tuo/Android/Sdk ./build-apk.sh
+```
+
+Installazione rapida dei pacchetti SDK necessari:
+
+```bash
+sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+```
 
 Test smoke della logica di gioco:
 

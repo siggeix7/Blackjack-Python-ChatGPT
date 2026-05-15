@@ -1,4 +1,4 @@
-package com.opencode.blackjack;
+package com.siggeix7.blackjack;
 
 final class BlackjackGameSmokeTest {
     public static void main(String[] args) {

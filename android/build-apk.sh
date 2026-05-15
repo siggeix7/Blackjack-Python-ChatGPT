@@ -2,14 +2,42 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-SDK="${ANDROID_HOME:-/tmp/opencode/android-sdk}"
-BUILD_TOOLS="$SDK/build-tools/35.0.0"
+SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
+if [[ -z "$SDK" && -n "${HOME:-}" && -d "$HOME/Android/Sdk" ]]; then
+  SDK="$HOME/Android/Sdk"
+elif [[ -z "$SDK" && -n "${HOME:-}" && -d "$HOME/Library/Android/sdk" ]]; then
+  SDK="$HOME/Library/Android/sdk"
+fi
+
+if [[ -z "$SDK" ]]; then
+  printf 'Android SDK not found. Set ANDROID_HOME or ANDROID_SDK_ROOT to your Android SDK path.\n' >&2
+  printf 'Example: ANDROID_HOME="$HOME/Android/Sdk" ./build-apk.sh\n' >&2
+  exit 1
+fi
+
+BUILD_TOOLS="${ANDROID_BUILD_TOOLS:-}"
+if [[ -z "$BUILD_TOOLS" ]]; then
+  for dir in "$SDK"/build-tools/35.0.0 "$SDK"/build-tools/35.* "$SDK"/build-tools/*; do
+    if [[ -d "$dir" && -x "$dir/aapt2" && -x "$dir/d8" && -x "$dir/zipalign" && -x "$dir/apksigner" ]]; then
+      BUILD_TOOLS="$dir"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$BUILD_TOOLS" ]]; then
+  printf 'Android build-tools not found in %s/build-tools. Install build-tools 35.0.0.\n' "$SDK" >&2
+  exit 1
+fi
+
 PLATFORM_JAR="${ANDROID_PLATFORM_JAR:-$SDK/platforms/android-35/android.jar}"
 OUT="$APP_DIR/build"
 APK_OUT="$OUT/outputs/blackjack-royal.apk"
 
 if [[ ! -f "$PLATFORM_JAR" ]]; then
   printf 'Android platform not found: %s\n' "$PLATFORM_JAR" >&2
+  printf 'Install platform android-35 or set ANDROID_PLATFORM_JAR to a valid android.jar.\n' >&2
   exit 1
 fi
 
@@ -53,7 +81,7 @@ if [[ ! -f "$KEYSTORE" && -z "${BLACKJACK_KEYSTORE:-}" ]]; then
     -keyalg RSA \
     -keysize 2048 \
     -validity 10000 \
-    -dname "CN=Blackjack Royal,O=OpenCode,C=IT"
+    -dname "CN=Blackjack Royal,O=Blackjack Royal,C=IT"
 fi
 
 if [[ ! -f "$KEYSTORE" ]]; then

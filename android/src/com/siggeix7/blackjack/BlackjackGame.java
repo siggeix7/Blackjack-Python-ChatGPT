@@ -1,4 +1,4 @@
-package com.opencode.blackjack;
+package com.siggeix7.blackjack;
 
 import java.text.NumberFormat;
 import java.util.ArrayList;

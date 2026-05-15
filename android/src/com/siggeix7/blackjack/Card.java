@@ -1,4 +1,4 @@
-package com.opencode.blackjack;
+package com.siggeix7.blackjack;
 
 import java.util.ArrayList;
 import java.util.Collections;

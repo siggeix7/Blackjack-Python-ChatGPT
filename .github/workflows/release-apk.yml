@@ -1,0 +1,82 @@
+name: Release APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="sdkmanager"
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Build APK
+        working-directory: android
+        shell: bash
+        run: ./build-apk.sh
+
+      - name: Prepare release asset
+        id: release_info
+        shell: bash
+        run: |
+          mkdir -p release
+          SHORT_SHA="${GITHUB_SHA::7}"
+          RELEASE_TAG="apk-${SHORT_SHA}"
+          APK_NAME="blackjack-royal-${SHORT_SHA}.apk"
+          cp android/build/outputs/blackjack-royal.apk "release/${APK_NAME}"
+          printf 'tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          printf 'title=%s\n' "Blackjack Royal ${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          printf 'apk=%s\n' "release/${APK_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackjack-royal-apk
+          path: release/*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.release_info.outputs.tag }}"
+          TITLE="${{ steps.release_info.outputs.title }}"
+          APK="${{ steps.release_info.outputs.apk }}"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$APK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --notes "APK Android generato automaticamente per il commit ${GITHUB_SHA}."
+          fi

@@ -75,3 +75,21 @@ BLACKJACK_KEYSTORE_PASSWORD=password \
 BLACKJACK_KEY_PASSWORD=password \
 ./build-apk.sh
 ```
+
+## Pubblicare una release APK
+
+Il repository contiene un workflow GitHub Actions in `.github/workflows/release-apk.yml`.
+
+Ogni commit pubblicato su `main` avvia automaticamente la build Android e crea una GitHub Release con l'APK allegato.
+
+Esempio:
+
+```bash
+git add .
+git commit -m "Update game"
+git push origin main
+```
+
+Il workflow crea una release con tag automatico `apk-<short-sha>`, per esempio `apk-a1b2c3d`, e allega un file come `blackjack-royal-a1b2c3d.apk`.
+
+Il workflow puo' anche essere avviato manualmente dalla scheda GitHub Actions. In quel caso non crea una release, ma pubblica l'APK come artifact scaricabile dal run.

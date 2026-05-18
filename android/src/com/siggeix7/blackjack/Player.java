@@ -60,6 +60,32 @@ final class Player {
         return hand.size() == 2 && score(hand) == 21;
     }
 
+    static boolean isSoft17(List<Card> hand) {
+        int total = 0;
+        int aces = 0;
+        for (int i = 0; i < hand.size(); i++) {
+            Card card = hand.get(i);
+            total += card.value();
+            if ("A".equals(card.rank)) {
+                aces++;
+            }
+        }
+        while (total > 21 && aces > 0) {
+            total -= 10;
+            aces--;
+        }
+        return total == 17 && aces > 0;
+    }
+
+    static boolean hasAce(List<Card> hand) {
+        for (int i = 0; i < hand.size(); i++) {
+            if ("A".equals(hand.get(i).rank)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     boolean canDouble(int handIndex) {
         return validHand(handIndex)
             && hands.get(handIndex).size() == 2
@@ -142,6 +168,7 @@ final class Player {
         int splits;
         int surrenders;
         int insuranceWon;
+        int sideBetsWon;
         int net;
     }
 }

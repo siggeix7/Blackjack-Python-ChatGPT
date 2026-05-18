@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
@@ -60,10 +62,15 @@ public final class MainActivity extends Activity {
     private SharedPreferences prefs;
     private BlackjackGame game;
     private Handler handler;
+    private ToneGenerator tone;
     private FrameLayout root;
     private FrameLayout tableLayer;
     private LinearLayout actionDock;
     private TextView logTicker;
+    private String currentProfile = "Giocatore";
+    private boolean soundEnabled = true;
+    private boolean vibrationEnabled = true;
+    private boolean fastAnimations;
 
     private final HashMap<String, Integer> lastCardCounts = new HashMap<String, Integer>();
     private final HashMap<String, Boolean> lastHiddenRows = new HashMap<String, Boolean>();
@@ -85,9 +92,12 @@ public final class MainActivity extends Activity {
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         handler = new Handler(Looper.getMainLooper());
+        tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 45);
+        loadAppSettings();
         String savedName = prefs.getString("name", null);
-        game = new BlackjackGame(savedName == null ? "Giocatore" : savedName);
-        if (savedName != null) {
+        currentProfile = prefs.getString("active_profile", savedName == null ? "Giocatore" : savedName);
+        game = new BlackjackGame(currentProfile);
+        if (savedName != null || prefs.contains(prefKey("balance"))) {
             restoreFromPrefs();
         }
         buildLayout();
@@ -112,6 +122,10 @@ public final class MainActivity extends Activity {
         super.onDestroy();
         if (handler != null) {
             handler.removeCallbacksAndMessages(null);
+        }
+        if (tone != null) {
+            tone.release();
+            tone = null;
         }
     }
 
@@ -310,6 +324,21 @@ public final class MainActivity extends Activity {
         }), miniButtonParams());
         menu.addView(tinyButton("Hall", 0xDF1B2545, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); showHallDialog(); }
+        }), miniButtonParams());
+        menu.addView(tinyButton("Regole", 0xDF123143, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showRulesDialog(); }
+        }), miniButtonParams());
+        menu.addView(tinyButton("Tavoli", 0xDF1B2545, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showTablesDialog(); }
+        }), miniButtonParams());
+        menu.addView(tinyButton("Trofei", 0xDF233A5E, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showAchievementsDialog(); }
+        }), miniButtonParams());
+        menu.addView(tinyButton("Profili", 0xDF123143, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showProfilesDialog(); }
+        }), miniButtonParams());
+        menu.addView(tinyButton("Audio", 0xDF1B2545, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showOptionsDialog(); }
         }), miniButtonParams());
         menu.addView(tinyButton("Reset", 0xDF642235, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); confirmNewGame(); }
@@ -532,19 +561,25 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER);
-        row.addView(dockText("Puntata " + BlackjackGame.money(game.currentBet)), weighted(1.35f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("-10", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.changeBet(-10); feedback(v); render(); }
-        }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
+        row.addView(dockText("Main " + BlackjackGame.money(game.currentBet)), weighted(1.15f, dp(2), 0, dp(2), dp(4)));
         row.addView(actionButton("+10", 0xFF1B2636, new View.OnClickListener() {
             @Override public void onClick(View v) { game.changeBet(10); feedback(v); render(); }
-        }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("+25", 0xFF1B2636, new View.OnClickListener() {
+        }), weighted(0.72f, dp(2), 0, dp(2), dp(4)));
+        row.addView(actionButton("+25", 0xFF233A5E, new View.OnClickListener() {
             @Override public void onClick(View v) { game.changeBet(25); feedback(v); render(); }
-        }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("Max", 0xFF233A5E, new View.OnClickListener() {
+        }), weighted(0.72f, dp(2), 0, dp(2), dp(4)));
+        row.addView(actionButton("+100", 0xFF2D235E, new View.OnClickListener() {
+            @Override public void onClick(View v) { game.changeBet(100); feedback(v); render(); }
+        }), weighted(0.82f, dp(2), 0, dp(2), dp(4)));
+        row.addView(actionButton("Ripeti", 0xFF1F3B4B, new View.OnClickListener() {
+            @Override public void onClick(View v) { game.repeatLastBet(); feedback(v); render(); }
+        }), weighted(0.9f, dp(2), 0, dp(2), dp(4)));
+        row.addView(actionButton("Cancella", 0xFF43263A, new View.OnClickListener() {
+            @Override public void onClick(View v) { game.clearBet(); game.clearSideBets(); feedback(v); render(); }
+        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
+        row.addView(actionButton("All-in", 0xFF233A5E, new View.OnClickListener() {
             @Override public void onClick(View v) { game.setMaxBet(); feedback(v); render(); }
-        }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
+        }), weighted(0.85f, dp(2), 0, dp(2), dp(4)));
         Button deal = actionButton(game.phase == BlackjackGame.Phase.ROUND_OVER ? "Nuova mano" : "Deal", GOLD_DARK, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 feedback(v);
@@ -556,8 +591,26 @@ public final class MainActivity extends Activity {
             }
         });
         deal.setEnabled(game.canDeal());
-        row.addView(deal, weighted(1.65f, dp(2), 0, dp(2), dp(4)));
+        row.addView(deal, weighted(1.25f, dp(2), 0, dp(2), dp(4)));
         actionDock.addView(row, fullWidth(0, 0, 0, 0));
+
+        LinearLayout side = new LinearLayout(this);
+        side.setOrientation(LinearLayout.HORIZONTAL);
+        side.setGravity(Gravity.CENTER);
+        side.addView(dockText("Pairs " + BlackjackGame.money(game.sideBetPairs)), weighted(1f, dp(2), 0, dp(2), 0));
+        side.addView(actionButton("+5", 0xFF284453, new View.OnClickListener() {
+            @Override public void onClick(View v) { game.changeSideBet(true, 5); feedback(v); render(); }
+        }), weighted(0.55f, dp(2), 0, dp(2), 0));
+        side.addView(dockText("21+3 " + BlackjackGame.money(game.sideBetTwentyOneThree)), weighted(1f, dp(2), 0, dp(2), 0));
+        side.addView(actionButton("+5", 0xFF284453, new View.OnClickListener() {
+            @Override public void onClick(View v) { game.changeSideBet(false, 5); feedback(v); render(); }
+        }), weighted(0.55f, dp(2), 0, dp(2), 0));
+        if (game.phase == BlackjackGame.Phase.ROUND_OVER) {
+            side.addView(actionButton("Riepilogo", 0xFF1F3B4B, new View.OnClickListener() {
+                @Override public void onClick(View v) { feedback(v); showRoundSummaryDialog(); }
+            }), weighted(1f, dp(2), 0, dp(2), 0));
+        }
+        actionDock.addView(side, fullWidth(0, 0, 0, 0));
     }
 
     private void renderInsuranceActions() {
@@ -606,6 +659,9 @@ public final class MainActivity extends Activity {
         });
         surrender.setEnabled(game.canSurrender());
         row.addView(surrender, weighted(1.25f, dp(2), 0, dp(2), dp(4)));
+        row.addView(actionButton("Consiglio", 0xFF284453, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showInfoDialog("Suggerimento", game.strategyHint()); }
+        }), weighted(1.25f, dp(2), 0, dp(2), dp(4)));
         actionDock.addView(row, fullWidth(0, 0, 0, 0));
     }
 
@@ -735,7 +791,7 @@ public final class MainActivity extends Activity {
         render();
         handler.postDelayed(new Runnable() {
             @Override public void run() { runInitialDealStep(); }
-        }, 650L);
+        }, delay(650L));
     }
 
     private void runInitialDealStep() {
@@ -776,7 +832,7 @@ public final class MainActivity extends Activity {
         render();
         handler.postDelayed(new Runnable() {
             @Override public void run() { runInitialDealStep(); }
-        }, dealStep > secondDealerStep ? 900L : 520L);
+        }, delay(dealStep > secondDealerStep ? 900L : 520L));
     }
 
     private void startCpuSequence() {
@@ -787,7 +843,7 @@ public final class MainActivity extends Activity {
         render();
         handler.postDelayed(new Runnable() {
             @Override public void run() { runCpuStep(); }
-        }, 850L);
+        }, delay(850L));
     }
 
     private void runCpuStep() {
@@ -803,7 +859,7 @@ public final class MainActivity extends Activity {
             render();
             handler.postDelayed(new Runnable() {
                 @Override public void run() { runCpuStep(); }
-            }, Math.max(650, action.delayMs));
+            }, delay(Math.max(650, action.delayMs)));
         } else {
             startDealerSequence();
         }
@@ -817,7 +873,7 @@ public final class MainActivity extends Activity {
         render();
         handler.postDelayed(new Runnable() {
             @Override public void run() { revealDealerCard(); }
-        }, 1200L);
+        }, delay(1200L));
     }
 
     private void revealDealerCard() {
@@ -832,7 +888,7 @@ public final class MainActivity extends Activity {
         render();
         handler.postDelayed(new Runnable() {
             @Override public void run() { runDealerStep(); }
-        }, game.dealerHasBlackjack() ? 1400L : 950L);
+        }, delay(game.dealerHasBlackjack() ? 1400L : 950L));
     }
 
     private void runDealerStep() {
@@ -857,7 +913,7 @@ public final class MainActivity extends Activity {
             render();
             handler.postDelayed(new Runnable() {
                 @Override public void run() { runDealerStep(); }
-            }, 1150L);
+            }, delay(1150L));
         } else {
             cinematicMessage = "Il banco resta con " + Player.score(game.dealerHand) + ". Si pagano le mani.";
             game.settleCurrentRound(false);
@@ -902,28 +958,70 @@ public final class MainActivity extends Activity {
 
     private void restoreFromPrefs() {
         Player.Stats stats = new Player.Stats();
-        stats.hands = prefs.getInt("stats_hands", 0);
-        stats.wins = prefs.getInt("stats_wins", 0);
-        stats.losses = prefs.getInt("stats_losses", 0);
-        stats.pushes = prefs.getInt("stats_pushes", 0);
-        stats.busts = prefs.getInt("stats_busts", 0);
-        stats.blackjacks = prefs.getInt("stats_blackjacks", 0);
-        stats.doubles = prefs.getInt("stats_doubles", 0);
-        stats.splits = prefs.getInt("stats_splits", 0);
-        stats.surrenders = prefs.getInt("stats_surrenders", 0);
-        stats.insuranceWon = prefs.getInt("stats_insurance", 0);
-        stats.net = prefs.getInt("stats_net", 0);
+        stats.hands = prefInt("stats_hands", 0);
+        stats.wins = prefInt("stats_wins", 0);
+        stats.losses = prefInt("stats_losses", 0);
+        stats.pushes = prefInt("stats_pushes", 0);
+        stats.busts = prefInt("stats_busts", 0);
+        stats.blackjacks = prefInt("stats_blackjacks", 0);
+        stats.doubles = prefInt("stats_doubles", 0);
+        stats.splits = prefInt("stats_splits", 0);
+        stats.surrenders = prefInt("stats_surrenders", 0);
+        stats.insuranceWon = prefInt("stats_insurance", 0);
+        stats.sideBetsWon = prefInt("stats_side_bets", 0);
+        stats.net = prefInt("stats_net", 0);
+        int savedTableIndex = prefInt("table_index", 0);
+        game.rules.decks = prefInt("rules_decks", BlackjackGame.NUM_DECKS);
+        game.rules.blackjackPaysSixToFive = prefs.getBoolean(prefKey("rules_6_5"), prefs.getBoolean("rules_6_5", false));
+        game.rules.dealerHitsSoft17 = prefs.getBoolean(prefKey("rules_h17"), prefs.getBoolean("rules_h17", false));
+        game.rules.surrenderEnabled = prefs.getBoolean(prefKey("rules_surrender"), prefs.getBoolean("rules_surrender", true));
+        game.rules.doubleAfterSplit = prefs.getBoolean(prefKey("rules_das"), prefs.getBoolean("rules_das", true));
+        game.sideBetPairs = prefInt("side_pairs", 0);
+        game.sideBetTwentyOneThree = prefInt("side_213", 0);
+        game.winStreak = prefInt("win_streak", 0);
+        game.bestBalance = prefInt("best_balance", BlackjackGame.START_BALANCE);
+        game.importAchievements(prefs.getString(prefKey("achievements"), prefs.getString("achievements", "")));
         game.restoreProgress(
-            prefs.getInt("balance", BlackjackGame.START_BALANCE),
-            prefs.getInt("dealer_bank", BlackjackGame.START_DEALER_BANK),
-            prefs.getInt("current_bet", BlackjackGame.MIN_BET),
+            prefInt("balance", BlackjackGame.START_BALANCE),
+            prefInt("dealer_bank", BlackjackGame.START_DEALER_BANK),
+            prefInt("current_bet", BlackjackGame.MIN_BET),
             stats);
+        game.selectTable(savedTableIndex);
     }
 
     private void persistProgress() {
         Player.Stats stats = game.human.stats;
         prefs.edit()
             .putString("name", game.human.name)
+            .putString("active_profile", currentProfile)
+            .putString("profiles", profilesWith(currentProfile))
+            .putString(prefKey("name"), game.human.name)
+            .putInt(prefKey("balance"), game.human.balance)
+            .putInt(prefKey("dealer_bank"), game.dealerBankroll)
+            .putInt(prefKey("current_bet"), game.currentBet)
+            .putInt(prefKey("side_pairs"), game.sideBetPairs)
+            .putInt(prefKey("side_213"), game.sideBetTwentyOneThree)
+            .putInt(prefKey("table_index"), game.tableIndex)
+            .putInt(prefKey("rules_decks"), game.rules.decks)
+            .putBoolean(prefKey("rules_6_5"), game.rules.blackjackPaysSixToFive)
+            .putBoolean(prefKey("rules_h17"), game.rules.dealerHitsSoft17)
+            .putBoolean(prefKey("rules_surrender"), game.rules.surrenderEnabled)
+            .putBoolean(prefKey("rules_das"), game.rules.doubleAfterSplit)
+            .putInt(prefKey("best_balance"), game.bestBalance)
+            .putInt(prefKey("win_streak"), game.winStreak)
+            .putString(prefKey("achievements"), game.exportAchievements())
+            .putInt(prefKey("stats_hands"), stats.hands)
+            .putInt(prefKey("stats_wins"), stats.wins)
+            .putInt(prefKey("stats_losses"), stats.losses)
+            .putInt(prefKey("stats_pushes"), stats.pushes)
+            .putInt(prefKey("stats_busts"), stats.busts)
+            .putInt(prefKey("stats_blackjacks"), stats.blackjacks)
+            .putInt(prefKey("stats_doubles"), stats.doubles)
+            .putInt(prefKey("stats_splits"), stats.splits)
+            .putInt(prefKey("stats_surrenders"), stats.surrenders)
+            .putInt(prefKey("stats_insurance"), stats.insuranceWon)
+            .putInt(prefKey("stats_side_bets"), stats.sideBetsWon)
+            .putInt(prefKey("stats_net"), stats.net)
             .putInt("balance", game.human.balance)
             .putInt("dealer_bank", game.dealerBankroll)
             .putInt("current_bet", game.currentBet)
@@ -937,8 +1035,87 @@ public final class MainActivity extends Activity {
             .putInt("stats_splits", stats.splits)
             .putInt("stats_surrenders", stats.surrenders)
             .putInt("stats_insurance", stats.insuranceWon)
+            .putInt("stats_side_bets", stats.sideBetsWon)
             .putInt("stats_net", stats.net)
             .apply();
+    }
+
+    private void loadAppSettings() {
+        soundEnabled = prefs.getBoolean("sound_enabled", true);
+        vibrationEnabled = prefs.getBoolean("vibration_enabled", true);
+        fastAnimations = prefs.getBoolean("fast_animations", false);
+    }
+
+    private void persistAppSettings() {
+        prefs.edit()
+            .putBoolean("sound_enabled", soundEnabled)
+            .putBoolean("vibration_enabled", vibrationEnabled)
+            .putBoolean("fast_animations", fastAnimations)
+            .apply();
+    }
+
+    private int prefInt(String key, int fallback) {
+        return prefs.getInt(prefKey(key), prefs.getInt(key, fallback));
+    }
+
+    private String prefKey(String key) {
+        return "profile_" + safeProfile(currentProfile) + "_" + key;
+    }
+
+    private String safeProfile(String name) {
+        String value = name == null ? "Giocatore" : name.trim();
+        if (value.length() == 0) {
+            value = "Giocatore";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isLetterOrDigit(c)) {
+                builder.append(Character.toLowerCase(c));
+            } else {
+                builder.append('_');
+            }
+        }
+        return builder.toString();
+    }
+
+    private String cleanProfile(String name) {
+        if (name == null) {
+            return "Giocatore";
+        }
+        String trimmed = name.trim();
+        return trimmed.length() == 0 ? "Giocatore" : trimmed;
+    }
+
+    private String profilesWith(String profile) {
+        String list = prefs.getString("profiles", "");
+        if (profile == null || profile.trim().length() == 0) {
+            return list;
+        }
+        String[] items = list.split("\\|");
+        for (int i = 0; i < items.length; i++) {
+            if (profile.equals(items[i])) {
+                return list;
+            }
+        }
+        return list.length() == 0 ? profile : list + "|" + profile;
+    }
+
+    private void switchProfile(String profile) {
+        persistProgress();
+        currentProfile = cleanProfile(profile);
+        prefs.edit()
+            .putString("active_profile", currentProfile)
+            .putString("profiles", profilesWith(currentProfile))
+            .apply();
+        game = new BlackjackGame(currentProfile);
+        if (prefs.contains(prefKey("balance"))) {
+            restoreFromPrefs();
+        }
+        resetAnimationState();
+        cinematicMessage = "Profilo " + currentProfile + " caricato. Scegli la puntata.";
+        persistProgress();
+        render();
     }
 
     private void appendHallEntry() {
@@ -970,7 +1147,8 @@ public final class MainActivity extends Activity {
         box.addView(actionButton("Siediti al tavolo", GOLD_DARK, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 feedback(v);
-                game.newSession(input.getText().toString());
+                currentProfile = cleanProfile(input.getText().toString());
+                game.newSession(currentProfile);
                 resetAnimationState();
                 persistProgress();
                 dialog.dismiss();
@@ -990,6 +1168,124 @@ public final class MainActivity extends Activity {
             hall = "Nessuna partita conclusa ancora.";
         }
         showInfoDialog("Hall of Fame", hall);
+    }
+
+    private void showRoundSummaryDialog() {
+        showInfoDialog("Riepilogo mano", game.lastRoundSummary);
+    }
+
+    private void showAchievementsDialog() {
+        showInfoDialog("Trofei", game.achievementsText());
+    }
+
+    private void showRulesDialog() {
+        final Dialog dialog = new Dialog(this);
+        LinearLayout box = dialogBox();
+        box.addView(dialogTitle("Regole tavolo"));
+        box.addView(dialogMessage(game.rulesText()), fullWidth(0, 0, 0, dp(10)));
+
+        LinearLayout row1 = new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        row1.addView(actionButton("Mazzi -", 0xFF1B2636, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks - 1, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
+        row1.addView(actionButton("Mazzi +", 0xFF1B2636, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks + 1, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
+        box.addView(row1);
+
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        row2.addView(actionButton(game.rules.blackjackPaysSixToFive ? "BJ 6:5" : "BJ 3:2", GOLD_DARK, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, !game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
+        row2.addView(actionButton(game.rules.dealerHitsSoft17 ? "Soft17 pesca" : "Soft17 sta", 0xFF284453, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, game.rules.blackjackPaysSixToFive, !game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
+        box.addView(row2);
+
+        LinearLayout row3 = new LinearLayout(this);
+        row3.setOrientation(LinearLayout.HORIZONTAL);
+        row3.addView(actionButton(game.rules.surrenderEnabled ? "Surrender on" : "Surrender off", 0xFF1F3B4B, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, !game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
+        row3.addView(actionButton(game.rules.doubleAfterSplit ? "DAS on" : "DAS off", 0xFF1F3B4B, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, !game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
+        box.addView(row3);
+        box.addView(actionButton("Chiudi", GOLD_DARK, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); dialog.dismiss(); render(); }
+        }), fullWidth(0, dp(8), 0, 0));
+        showCasinoDialog(dialog, box, true);
+    }
+
+    private void showTablesDialog() {
+        final Dialog dialog = new Dialog(this);
+        LinearLayout box = dialogBox();
+        box.addView(dialogTitle("Tavoli carriera"));
+        box.addView(dialogMessage(game.careerText()), fullWidth(0, 0, 0, dp(10)));
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < BlackjackGame.Rules.TABLE_NAMES.length; i++) {
+            final int index = i;
+            Button table = actionButton(BlackjackGame.Rules.TABLE_NAMES[i], i == game.tableIndex ? GOLD_DARK : 0xFF1B2636, new View.OnClickListener() {
+                @Override public void onClick(View v) { feedback(v); game.selectTable(index); persistProgress(); dialog.dismiss(); render(); }
+            });
+            row.addView(table, weighted(1f, dp(2), 0, dp(2), 0));
+        }
+        box.addView(row);
+        showCasinoDialog(dialog, box, true);
+    }
+
+    private void showOptionsDialog() {
+        final Dialog dialog = new Dialog(this);
+        LinearLayout box = dialogBox();
+        box.addView(dialogTitle("Opzioni"));
+        box.addView(dialogMessage("Audio: " + (soundEnabled ? "on" : "off")
+            + "\nVibrazione: " + (vibrationEnabled ? "on" : "off")
+            + "\nAnimazioni: " + (fastAnimations ? "rapide" : "cinematiche")), fullWidth(0, 0, 0, dp(10)));
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.addView(actionButton("Audio", 0xFF1B2636, new View.OnClickListener() {
+            @Override public void onClick(View v) { soundEnabled = !soundEnabled; feedback(v); persistAppSettings(); dialog.dismiss(); showOptionsDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), 0));
+        row.addView(actionButton("Vibra", 0xFF1B2636, new View.OnClickListener() {
+            @Override public void onClick(View v) { vibrationEnabled = !vibrationEnabled; feedback(v); persistAppSettings(); dialog.dismiss(); showOptionsDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), 0));
+        row.addView(actionButton("Velocita", 0xFF1B2636, new View.OnClickListener() {
+            @Override public void onClick(View v) { fastAnimations = !fastAnimations; feedback(v); persistAppSettings(); dialog.dismiss(); showOptionsDialog(); }
+        }), weighted(1f, dp(2), 0, dp(2), 0));
+        box.addView(row);
+        showCasinoDialog(dialog, box, true);
+    }
+
+    private void showProfilesDialog() {
+        final Dialog dialog = new Dialog(this);
+        LinearLayout box = dialogBox();
+        box.addView(dialogTitle("Profili"));
+        box.addView(dialogMessage("Profilo attivo: " + currentProfile), fullWidth(0, 0, 0, dp(8)));
+        String list = profilesWith(currentProfile);
+        String[] profiles = list.split("\\|");
+        for (int i = 0; i < profiles.length; i++) {
+            final String profile = profiles[i];
+            if (profile.trim().length() == 0) {
+                continue;
+            }
+            box.addView(actionButton(profile, profile.equals(currentProfile) ? GOLD_DARK : 0xFF1B2636, new View.OnClickListener() {
+                @Override public void onClick(View v) { feedback(v); switchProfile(profile); dialog.dismiss(); }
+            }), fullWidth(0, 0, 0, dp(5)));
+        }
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Nuovo profilo");
+        input.setTextColor(TEXT);
+        input.setHintTextColor(MUTED);
+        input.setBackground(gradientRect(0xD90B1220, 0xC60E2530, 0x6632D5FF, dp(14), dp(1)));
+        box.addView(input, fullWidth(0, dp(8), 0, dp(8)));
+        box.addView(actionButton("Crea / passa", GOLD_DARK, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); switchProfile(cleanProfile(input.getText().toString())); dialog.dismiss(); }
+        }), fullWidth(0, 0, 0, 0));
+        showCasinoDialog(dialog, box, true);
     }
 
     private void confirmNewGame() {
@@ -1090,6 +1386,10 @@ public final class MainActivity extends Activity {
         return player.cpu ? player.name : "te";
     }
 
+    private long delay(long ms) {
+        return fastAnimations ? Math.max(120L, (long) (ms * 0.55f)) : ms;
+    }
+
     private String phaseText() {
         if (game.phase == BlackjackGame.Phase.BETTING) return "Fase puntate";
         if (game.phase == BlackjackGame.Phase.DEALING) return "Distribuzione";
@@ -1186,7 +1486,12 @@ public final class MainActivity extends Activity {
     }
 
     private void feedback(View view) {
-        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        if (vibrationEnabled) {
+            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        }
+        if (soundEnabled && tone != null) {
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 45);
+        }
         view.animate().cancel();
         view.setScaleX(0.96f);
         view.setScaleY(0.96f);
@@ -1320,8 +1625,8 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout.LayoutParams miniButtonParams() {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(compact() ? 58 : 74), dp(compact() ? 30 : 34));
-        params.setMargins(0, 0, 0, dp(5));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(compact() ? 62 : 80), dp(compact() ? 26 : 31));
+        params.setMargins(0, 0, 0, dp(4));
         return params;
     }
 

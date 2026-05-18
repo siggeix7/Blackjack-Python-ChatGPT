@@ -3,6 +3,7 @@ package com.siggeix7.blackjack;
 import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Random;
 
@@ -35,18 +36,32 @@ final class BlackjackGame {
     final ArrayList<Player> tablePlayers = new ArrayList<Player>();
     final ArrayList<Card> dealerHand = new ArrayList<Card>();
     final ArrayList<String> events = new ArrayList<String>();
+    final Rules rules = new Rules();
+    final LinkedHashSet<String> achievements = new LinkedHashSet<String>();
 
     Player human;
     Phase phase = Phase.BETTING;
     int dealerBankroll = START_DEALER_BANK;
     int currentBet = MIN_BET;
+    int sideBetPairs;
+    int sideBetTwentyOneThree;
     int activeHandIndex;
     int activeCpuPlayerIndex;
     int activeCpuHandIndex;
+    int tableIndex;
+    int winStreak;
+    int bestBalance = START_BALANCE;
     boolean hallRecorded;
+    String lastRoundSummary = "Nessuna mano conclusa ancora.";
 
     private ArrayList<Card> shoe = Card.buildShoe(NUM_DECKS, random);
     private int usedCards;
+    private int activeSideBetPairs;
+    private int activeSideBetTwentyOneThree;
+    private int lastMainBet = MIN_BET;
+    private int lastRoundNet;
+    private int lastSideBetNet;
+    private String lastSideBetSummary = "";
 
     BlackjackGame(String playerName) {
         newSession(playerName);
@@ -57,10 +72,19 @@ final class BlackjackGame {
         tablePlayers.clear();
         dealerHand.clear();
         events.clear();
-        shoe = Card.buildShoe(NUM_DECKS, random);
+        shoe = Card.buildShoe(rules.decks, random);
         usedCards = 0;
         dealerBankroll = START_DEALER_BANK;
-        currentBet = MIN_BET;
+        currentBet = rules.minBet;
+        sideBetPairs = 0;
+        sideBetTwentyOneThree = 0;
+        activeSideBetPairs = 0;
+        activeSideBetTwentyOneThree = 0;
+        lastMainBet = rules.minBet;
+        lastRoundNet = 0;
+        winStreak = 0;
+        bestBalance = START_BALANCE;
+        lastRoundSummary = "Nessuna mano conclusa ancora.";
         phase = Phase.BETTING;
         hallRecorded = false;
         human = new Player(cleanName(playerName), START_BALANCE, false, "giocatore");
@@ -74,15 +98,16 @@ final class BlackjackGame {
             String difficulty = DIFFICULTIES[random.nextInt(DIFFICULTIES.length)];
             roster.add(new Player(names.get(i), START_BALANCE, true, difficulty));
         }
+        recordAchievement("Primo ingresso al tavolo");
         log("Benvenuto al tavolo, " + human.name + ". Scegli la puntata e distribuisci.");
     }
 
     void restoreProgress(int balance, int bank, int bet, Player.Stats savedStats) {
         human.balance = Math.max(0, balance);
         dealerBankroll = Math.max(0, bank);
-        currentBet = human.balance >= MIN_BET
-            ? Math.max(MIN_BET, Math.min(Math.max(MIN_BET, bet), human.balance))
-            : MIN_BET;
+        currentBet = human.balance >= rules.minBet
+            ? Math.max(rules.minBet, Math.min(Math.max(rules.minBet, bet), Math.min(rules.maxBet, human.balance)))
+            : rules.minBet;
         if (savedStats != null) {
             human.stats.hands = savedStats.hands;
             human.stats.wins = savedStats.wins;
@@ -94,9 +119,11 @@ final class BlackjackGame {
             human.stats.splits = savedStats.splits;
             human.stats.surrenders = savedStats.surrenders;
             human.stats.insuranceWon = savedStats.insuranceWon;
+            human.stats.sideBetsWon = savedStats.sideBetsWon;
             human.stats.net = savedStats.net;
         }
-        if (human.balance < MIN_BET || dealerBankroll <= 0) {
+        bestBalance = Math.max(bestBalance, human.balance);
+        if (human.balance < rules.minBet || dealerBankroll <= 0) {
             phase = Phase.GAME_OVER;
         }
     }
@@ -105,23 +132,60 @@ final class BlackjackGame {
         if (phase != Phase.BETTING && phase != Phase.ROUND_OVER) {
             return;
         }
-        int max = Math.max(MIN_BET, human.balance);
-        currentBet = Math.max(MIN_BET, Math.min(max, currentBet + delta));
+        int max = maxMainBetAllowed();
+        currentBet = Math.max(rules.minBet, Math.min(max, currentBet + delta));
     }
 
     void setMaxBet() {
         if (phase == Phase.BETTING || phase == Phase.ROUND_OVER) {
-            currentBet = Math.max(MIN_BET, human.balance);
+            currentBet = Math.max(rules.minBet, maxMainBetAllowed());
+        }
+    }
+
+    void clearBet() {
+        if (phase == Phase.BETTING || phase == Phase.ROUND_OVER) {
+            currentBet = Math.min(rules.minBet, Math.max(rules.minBet, human.balance));
+        }
+    }
+
+    void repeatLastBet() {
+        if (phase == Phase.BETTING || phase == Phase.ROUND_OVER) {
+            currentBet = Math.max(rules.minBet, Math.min(maxMainBetAllowed(), lastMainBet));
+        }
+    }
+
+    void changeSideBet(boolean pairs, int delta) {
+        if (phase != Phase.BETTING && phase != Phase.ROUND_OVER) {
+            return;
+        }
+        int current = pairs ? sideBetPairs : sideBetTwentyOneThree;
+        int other = pairs ? sideBetTwentyOneThree : sideBetPairs;
+        int max = Math.max(0, Math.min(rules.maxSideBet, human.balance - currentBet - other));
+        int updated = Math.max(0, Math.min(max, current + delta));
+        if (pairs) {
+            sideBetPairs = updated;
+        } else {
+            sideBetTwentyOneThree = updated;
+        }
+    }
+
+    void clearSideBets() {
+        if (phase == Phase.BETTING || phase == Phase.ROUND_OVER) {
+            sideBetPairs = 0;
+            sideBetTwentyOneThree = 0;
         }
     }
 
     boolean canDeal() {
-        return (phase == Phase.BETTING || phase == Phase.ROUND_OVER) && human.balance >= MIN_BET && dealerBankroll > 0;
+        return (phase == Phase.BETTING || phase == Phase.ROUND_OVER)
+            && currentBet >= rules.minBet
+            && human.balance >= currentBet + sideBetPairs + sideBetTwentyOneThree
+            && dealerBankroll > 0;
     }
 
     boolean prepareRound() {
         if (!canDeal()) {
-            if (human.balance < MIN_BET) {
+            if (human.balance < rules.minBet) {
                 phase = Phase.GAME_OVER;
                 log("Saldo insufficiente per continuare: partita terminata.");
             }
@@ -134,15 +198,27 @@ final class BlackjackGame {
         activeCpuPlayerIndex = 0;
         activeCpuHandIndex = 0;
         hallRecorded = false;
-        currentBet = Math.min(currentBet, human.balance);
+        currentBet = Math.min(currentBet, maxMainBetAllowed());
+        lastMainBet = currentBet;
         human.resetForRound();
         placeBet(human, currentBet);
+        activeSideBetPairs = sideBetPairs;
+        activeSideBetTwentyOneThree = sideBetTwentyOneThree;
+        if (activeSideBetPairs > 0) {
+            human.balance -= activeSideBetPairs;
+        }
+        if (activeSideBetTwentyOneThree > 0) {
+            human.balance -= activeSideBetTwentyOneThree;
+        }
+        lastSideBetSummary = "";
+        lastSideBetNet = 0;
+        lastRoundSummary = "Mano in corso...";
         tablePlayers.add(human);
 
         ArrayList<Player> candidates = new ArrayList<Player>();
         for (int i = 0; i < roster.size(); i++) {
             Player player = roster.get(i);
-            if (player.cpu && player.balance >= MIN_BET) {
+            if (player.cpu && player.balance >= rules.minBet) {
                 candidates.add(player);
             }
         }
@@ -192,6 +268,7 @@ final class BlackjackGame {
 
     void completeInitialDeal() {
         log("Nuova mano: " + tablePlayers.size() + " giocatori al tavolo. Il banco mostra " + dealerHand.get(0).label() + ".");
+        settleSideBets();
         if ("A".equals(dealerHand.get(0).rank)) {
             phase = Phase.INSURANCE;
             log("Il banco mostra un Asso: puoi acquistare assicurazione fino a meta' puntata.");
@@ -256,7 +333,8 @@ final class BlackjackGame {
     }
 
     boolean canDouble() {
-        return phase == Phase.PLAYER_TURN && human.canDouble(activeHandIndex);
+        return phase == Phase.PLAYER_TURN && human.canDouble(activeHandIndex)
+            && (rules.doubleAfterSplit || human.hands.size() == 1);
     }
 
     boolean canSplit() {
@@ -264,7 +342,7 @@ final class BlackjackGame {
     }
 
     boolean canSurrender() {
-        return phase == Phase.PLAYER_TURN && human.canSurrender(activeHandIndex);
+        return rules.surrenderEnabled && phase == Phase.PLAYER_TURN && human.canSurrender(activeHandIndex);
     }
 
     void hit() {
@@ -356,13 +434,17 @@ final class BlackjackGame {
         Player.Stats s = human.stats;
         double winRate = s.hands == 0 ? 0d : (100d * s.wins / s.hands);
         return "Giocatore: " + human.name
+            + "\nTavolo: " + tableName()
             + "\nSaldo: " + money(human.balance)
+            + "\nMiglior saldo: " + money(bestBalance)
+            + "\nSerie vittorie: " + winStreak
             + "\nMani giocate: " + s.hands
             + "\nWin rate: " + String.format(Locale.ITALY, "%.1f%%", Double.valueOf(winRate))
             + "\nVittorie: " + s.wins + "  Sconfitte: " + s.losses + "  Pareggi: " + s.pushes
             + "\nBlackjack: " + s.blackjacks + "  Sballi: " + s.busts
             + "\nRaddoppi: " + s.doubles + "  Split: " + s.splits + "  Surrender: " + s.surrenders
             + "\nAssicurazioni vinte: " + s.insuranceWon
+            + "\nSide bets vinte: " + s.sideBetsWon
             + "\nGuadagno netto: " + money(s.net);
     }
 
@@ -445,7 +527,8 @@ final class BlackjackGame {
     }
 
     boolean dealerShouldDraw() {
-        return hasLiveHandsForDealer() && Player.score(dealerHand) < 17;
+        int total = Player.score(dealerHand);
+        return hasLiveHandsForDealer() && (total < 17 || (rules.dealerHitsSoft17 && Player.isSoft17(dealerHand)));
     }
 
     Card dealerDrawStep() {
@@ -473,6 +556,15 @@ final class BlackjackGame {
 
     private void settleRound(boolean dealerBlackjack) {
         int dealerScore = Player.score(dealerHand);
+        int humanRoundNet = lastSideBetNet;
+        boolean humanWonHand = false;
+        boolean humanLostHand = false;
+        boolean humanSplitWin = false;
+        StringBuilder summary = new StringBuilder();
+        summary.append("Banco: ").append(handText(dealerHand)).append(" (totale ").append(dealerScore).append(")");
+        if (lastSideBetSummary.length() > 0) {
+            summary.append('\n').append(lastSideBetSummary);
+        }
         for (int p = 0; p < tablePlayers.size(); p++) {
             Player player = tablePlayers.get(p);
             for (int h = 0; h < player.hands.size(); h++) {
@@ -488,61 +580,108 @@ final class BlackjackGame {
                     player.stats.blackjacks++;
                 }
 
+                int net;
+                String result;
                 if (player.surrendered.get(h).booleanValue()) {
+                    net = -bet / 2;
+                    result = "resa";
                     dealerBankroll += bet / 2;
                     player.stats.losses++;
                     player.stats.net -= bet / 2;
-                    logResult(player, h, "resa", -bet / 2);
                 } else if (score > 21) {
+                    net = -bet;
+                    result = "sballa";
                     dealerBankroll += bet;
                     player.stats.losses++;
                     player.stats.busts++;
                     player.stats.net -= bet;
-                    logResult(player, h, "sballa", -bet);
                 } else if (dealerBlackjack && blackjack) {
+                    net = 0;
+                    result = "pareggia Blackjack";
                     player.balance += bet;
                     player.stats.pushes++;
-                    logResult(player, h, "pareggia Blackjack", 0);
                 } else if (dealerBlackjack) {
+                    net = -bet;
+                    result = "perde contro Blackjack banco";
                     dealerBankroll += bet;
                     player.stats.losses++;
                     player.stats.net -= bet;
-                    logResult(player, h, "perde contro Blackjack banco", -bet);
                 } else if (blackjack) {
-                    int win = bet * 3 / 2;
+                    int win = rules.blackjackPaysSixToFive ? bet * 6 / 5 : bet * 3 / 2;
+                    net = win;
+                    result = rules.blackjackPaysSixToFive ? "Blackjack paga 6:5" : "Blackjack paga 3:2";
                     player.balance += bet + win;
                     dealerBankroll -= win;
                     player.stats.wins++;
                     player.stats.net += win;
-                    logResult(player, h, "Blackjack paga 3:2", win);
                 } else if (dealerScore > 21 || score > dealerScore) {
+                    net = bet;
+                    result = "vince";
                     player.balance += bet * 2;
                     dealerBankroll -= bet;
                     player.stats.wins++;
                     player.stats.net += bet;
-                    logResult(player, h, "vince", bet);
                 } else if (score == dealerScore) {
+                    net = 0;
+                    result = "pareggia";
                     player.balance += bet;
                     player.stats.pushes++;
-                    logResult(player, h, "pareggia", 0);
                 } else {
+                    net = -bet;
+                    result = "perde";
                     dealerBankroll += bet;
                     player.stats.losses++;
                     player.stats.net -= bet;
-                    logResult(player, h, "perde", -bet);
+                }
+                logResult(player, h, result, net);
+                if (!player.cpu) {
+                    humanRoundNet += net;
+                    humanWonHand = humanWonHand || net > 0;
+                    humanLostHand = humanLostHand || net < 0;
+                    humanSplitWin = humanSplitWin || (player.hands.size() > 1 && net > 0);
+                    summary.append('\n')
+                        .append("Mano ").append(h + 1).append(": ")
+                        .append(handText(hand)).append(" = ").append(score).append(" -> ")
+                        .append(result).append(" (").append(net >= 0 ? "+" : "").append(money(net)).append(")");
                 }
             }
         }
+        lastRoundNet = humanRoundNet;
+        if (humanRoundNet > 0) {
+            winStreak++;
+        } else if (humanLostHand || humanRoundNet < 0) {
+            winStreak = 0;
+        }
+        if (humanWonHand) {
+            recordAchievement("Prima mano vincente");
+        }
+        if (winStreak >= 3) {
+            recordAchievement("Tre vittorie consecutive");
+        }
+        if (humanSplitWin) {
+            recordAchievement("Split vincente");
+        }
+        if (humanRoundNet >= Math.max(rules.minBet * 5, currentBet * 2)) {
+            recordAchievement("Colpo grosso");
+        }
+        if (human.balance > bestBalance) {
+            bestBalance = human.balance;
+            recordAchievement("Nuovo record saldo");
+        }
+        summary.append('\n').append("Netto mano: ").append(humanRoundNet >= 0 ? "+" : "").append(money(humanRoundNet));
+        summary.append('\n').append("Saldo: ").append(money(human.balance));
+        lastRoundSummary = summary.toString();
         if (dealerBankroll <= 0) {
             dealerBankroll = 0;
             phase = Phase.GAME_OVER;
+            recordAchievement("Banco battuto");
             log("Il banco e' andato a zero. Hai vinto la sala!");
-        } else if (human.balance < MIN_BET) {
+        } else if (human.balance < rules.minBet) {
             phase = Phase.GAME_OVER;
             log("Non hai abbastanza credito per un'altra mano. Partita terminata.");
         } else {
             phase = Phase.ROUND_OVER;
-            currentBet = Math.min(Math.max(MIN_BET, currentBet), human.balance);
+            currentBet = Math.min(Math.max(rules.minBet, currentBet), maxMainBetAllowed());
             log("Mano conclusa. Puoi distribuirne una nuova.");
         }
     }
@@ -559,7 +698,7 @@ final class BlackjackGame {
             return new TableAction(player.name + " passa alla mano successiva.", 650);
         }
         int total = Player.score(hand);
-        if (player.canSurrender(handIndex) && player.decideSurrender(total)) {
+        if (rules.surrenderEnabled && player.canSurrender(handIndex) && player.decideSurrender(total)) {
             int bet = player.bets.get(handIndex).intValue();
             player.balance += bet / 2;
             player.surrendered.set(handIndex, Boolean.TRUE);
@@ -586,7 +725,7 @@ final class BlackjackGame {
             log(player.name + " divide la mano.");
             return new TableAction(player.name + " divide: arrivano " + firstDraw.label() + " e " + secondDraw.label() + ".", 1400);
         }
-        if (player.canDouble(handIndex) && player.decideDouble(total)) {
+        if (player.canDouble(handIndex) && (rules.doubleAfterSplit || player.hands.size() == 1) && player.decideDouble(total)) {
             int bet = player.bets.get(handIndex).intValue();
             player.balance -= bet;
             player.bets.set(handIndex, Integer.valueOf(bet * 2));
@@ -626,7 +765,7 @@ final class BlackjackGame {
     }
 
     private void placeBet(Player player, int bet) {
-        int safeBet = Math.max(MIN_BET, Math.min(bet, player.balance));
+        int safeBet = Math.max(rules.minBet, Math.min(bet, player.balance));
         player.bets.set(0, Integer.valueOf(safeBet));
         player.balance -= safeBet;
     }
@@ -644,22 +783,308 @@ final class BlackjackGame {
     }
 
     private int chooseCpuBet(Player player) {
-        int[] options = {10, 20, 50};
+        int[] options = {rules.minBet, rules.minBet * 2, rules.minBet * 5};
         ArrayList<Integer> available = new ArrayList<Integer>();
         for (int i = 0; i < options.length; i++) {
-            if (options[i] <= player.balance) {
+            if (options[i] <= player.balance && options[i] <= rules.maxBet) {
                 available.add(Integer.valueOf(options[i]));
             }
         }
         if (available.isEmpty()) {
-            return Math.max(1, player.balance);
+            return Math.max(rules.minBet, Math.min(player.balance, rules.maxBet));
         }
         return available.get(random.nextInt(available.size())).intValue();
     }
 
+    void configureRules(int decks, boolean sixToFive, boolean hitSoft17, boolean surrender, boolean doubleAfterSplit) {
+        if (phase != Phase.BETTING && phase != Phase.ROUND_OVER && phase != Phase.GAME_OVER) {
+            return;
+        }
+        int safeDecks = Math.max(1, Math.min(8, decks));
+        boolean rebuildShoe = rules.decks != safeDecks;
+        rules.decks = safeDecks;
+        rules.blackjackPaysSixToFive = sixToFive;
+        rules.dealerHitsSoft17 = hitSoft17;
+        rules.surrenderEnabled = surrender;
+        rules.doubleAfterSplit = doubleAfterSplit;
+        currentBet = Math.max(rules.minBet, Math.min(maxMainBetAllowed(), currentBet));
+        if (rebuildShoe) {
+            shoe = Card.buildShoe(rules.decks, random);
+            usedCards = 0;
+            log("Regole aggiornate: shoe ricostruito con " + rules.decks + " mazzi.");
+        } else {
+            log("Regole tavolo aggiornate.");
+        }
+    }
+
+    boolean selectTable(int index) {
+        if (phase != Phase.BETTING && phase != Phase.ROUND_OVER && phase != Phase.GAME_OVER) {
+            return false;
+        }
+        if (index < 0 || index >= Rules.TABLE_NAMES.length) {
+            return false;
+        }
+        if (human.balance < Rules.TABLE_UNLOCKS[index]) {
+            log("Tavolo " + Rules.TABLE_NAMES[index] + " bloccato: servono " + money(Rules.TABLE_UNLOCKS[index]) + ".");
+            return false;
+        }
+        tableIndex = index;
+        rules.minBet = Rules.TABLE_MIN_BETS[index];
+        rules.maxBet = Rules.TABLE_MAX_BETS[index];
+        rules.maxSideBet = Rules.TABLE_SIDE_MAX[index];
+        currentBet = Math.max(rules.minBet, Math.min(maxMainBetAllowed(), currentBet));
+        sideBetPairs = Math.min(sideBetPairs, rules.maxSideBet);
+        sideBetTwentyOneThree = Math.min(sideBetTwentyOneThree, rules.maxSideBet);
+        log("Ti sposti al tavolo " + tableName() + ".");
+        return true;
+    }
+
+    String tableName() {
+        return Rules.TABLE_NAMES[Math.max(0, Math.min(tableIndex, Rules.TABLE_NAMES.length - 1))];
+    }
+
+    String rulesText() {
+        return "Tavolo: " + tableName()
+            + "\nMazzi: " + rules.decks
+            + "\nBlackjack: " + (rules.blackjackPaysSixToFive ? "paga 6:5" : "paga 3:2")
+            + "\nBanco su soft 17: " + (rules.dealerHitsSoft17 ? "pesca" : "sta")
+            + "\nSurrender: " + (rules.surrenderEnabled ? "attivo" : "disattivo")
+            + "\nDouble after split: " + (rules.doubleAfterSplit ? "attivo" : "disattivo")
+            + "\nPuntata: " + money(rules.minBet) + " - " + money(rules.maxBet)
+            + "\nSide bet max: " + money(rules.maxSideBet);
+    }
+
+    String careerText() {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Saldo: ").append(money(human.balance)).append("\n");
+        for (int i = 0; i < Rules.TABLE_NAMES.length; i++) {
+            builder.append(i == tableIndex ? "* " : "  ")
+                .append(Rules.TABLE_NAMES[i])
+                .append(" - puntate ").append(money(Rules.TABLE_MIN_BETS[i]))
+                .append("/").append(money(Rules.TABLE_MAX_BETS[i]))
+                .append(" - sblocco ").append(money(Rules.TABLE_UNLOCKS[i]));
+            if (human.balance < Rules.TABLE_UNLOCKS[i]) {
+                builder.append(" (bloccato)");
+            }
+            builder.append('\n');
+        }
+        return builder.toString();
+    }
+
+    String achievementsText() {
+        if (achievements.isEmpty()) {
+            return "Nessun trofeo ancora. Vinci una mano per iniziare.";
+        }
+        StringBuilder builder = new StringBuilder();
+        int index = 1;
+        for (String achievement : achievements) {
+            builder.append(index++).append(". ").append(achievement).append('\n');
+        }
+        return builder.toString();
+    }
+
+    String exportAchievements() {
+        StringBuilder builder = new StringBuilder();
+        for (String achievement : achievements) {
+            if (builder.length() > 0) {
+                builder.append('|');
+            }
+            builder.append(achievement.replace('|', '/'));
+        }
+        return builder.toString();
+    }
+
+    void importAchievements(String data) {
+        achievements.clear();
+        if (data == null || data.length() == 0) {
+            return;
+        }
+        String[] items = data.split("\\|");
+        for (int i = 0; i < items.length; i++) {
+            if (items[i].trim().length() > 0) {
+                achievements.add(items[i].trim());
+            }
+        }
+    }
+
+    String strategyHint() {
+        if (phase != Phase.PLAYER_TURN || !human.validHand(activeHandIndex)) {
+            return "Il suggerimento e' disponibile durante il tuo turno.";
+        }
+        ArrayList<Card> hand = human.hands.get(activeHandIndex);
+        int total = Player.score(hand);
+        int dealer = dealerHand.isEmpty() ? 0 : dealerHand.get(0).value();
+        if (dealer == 11) {
+            dealer = 11;
+        }
+        if (canSurrender() && (total == 16 && dealer >= 9 || total == 15 && dealer == 10)) {
+            return "Suggerimento: arrenditi. La mano e' debole contro la carta alta del banco.";
+        }
+        if (canSplit()) {
+            String rank = hand.get(0).rank;
+            if ("A".equals(rank) || "8".equals(rank)) {
+                return "Suggerimento: dividi. Assi e 8 sono gli split piu' forti.";
+            }
+            if (("10".equals(rank) || "J".equals(rank) || "Q".equals(rank) || "K".equals(rank))) {
+                return "Suggerimento: non dividere i 10. Stai con 20.";
+            }
+        }
+        if (canDouble() && (total == 11 || total == 10 && dealer <= 9 || total == 9 && dealer >= 3 && dealer <= 6)) {
+            return "Suggerimento: raddoppia. Hai vantaggio matematico su questa carta del banco.";
+        }
+        boolean soft = Player.hasAce(hand) && total <= 21;
+        if (soft && total >= 18) {
+            return dealer >= 9 ? "Suggerimento: pesca su soft " + total + " contro banco forte." : "Suggerimento: stai su soft " + total + ".";
+        }
+        if (total >= 17) {
+            return "Suggerimento: stai. Totale abbastanza solido.";
+        }
+        if (total >= 13 && dealer >= 2 && dealer <= 6) {
+            return "Suggerimento: stai. Lascia rischiare il banco.";
+        }
+        if (total == 12 && dealer >= 4 && dealer <= 6) {
+            return "Suggerimento: stai con 12 contro 4-6.";
+        }
+        return "Suggerimento: pesca. Devi migliorare la mano.";
+    }
+
+    private int maxMainBetAllowed() {
+        int available = human == null ? rules.maxBet : human.balance - sideBetPairs - sideBetTwentyOneThree;
+        return Math.max(rules.minBet, Math.min(rules.maxBet, available));
+    }
+
+    private void settleSideBets() {
+        lastSideBetSummary = "";
+        lastSideBetNet = 0;
+        if ((activeSideBetPairs <= 0 && activeSideBetTwentyOneThree <= 0)
+                || human.hands.isEmpty() || human.hands.get(0).size() < 2 || dealerHand.isEmpty()) {
+            return;
+        }
+        ArrayList<Card> hand = human.hands.get(0);
+        Card first = hand.get(0);
+        Card second = hand.get(1);
+        Card dealer = dealerHand.get(0);
+        StringBuilder summary = new StringBuilder("Side bets:");
+
+        if (activeSideBetPairs > 0) {
+            int odds = perfectPairsOdds(first, second);
+            if (odds > 0) {
+                int win = activeSideBetPairs * odds;
+                human.balance += activeSideBetPairs + win;
+                dealerBankroll -= win;
+                human.stats.sideBetsWon++;
+                human.stats.net += win;
+                lastSideBetNet += win;
+                recordAchievement("Perfect Pairs centrata");
+                summary.append("\nPerfect Pairs: vince ").append(money(win));
+                log("Perfect Pairs vince " + money(win) + ".");
+            } else {
+                dealerBankroll += activeSideBetPairs;
+                human.stats.net -= activeSideBetPairs;
+                lastSideBetNet -= activeSideBetPairs;
+                summary.append("\nPerfect Pairs: perde ").append(money(activeSideBetPairs));
+                log("Perfect Pairs non entra.");
+            }
+        }
+
+        if (activeSideBetTwentyOneThree > 0) {
+            int odds = twentyOneThreeOdds(first, second, dealer);
+            if (odds > 0) {
+                int win = activeSideBetTwentyOneThree * odds;
+                human.balance += activeSideBetTwentyOneThree + win;
+                dealerBankroll -= win;
+                human.stats.sideBetsWon++;
+                human.stats.net += win;
+                lastSideBetNet += win;
+                recordAchievement("21+3 centrata");
+                summary.append("\n21+3: vince ").append(money(win));
+                log("21+3 vince " + money(win) + ".");
+            } else {
+                dealerBankroll += activeSideBetTwentyOneThree;
+                human.stats.net -= activeSideBetTwentyOneThree;
+                lastSideBetNet -= activeSideBetTwentyOneThree;
+                summary.append("\n21+3: perde ").append(money(activeSideBetTwentyOneThree));
+                log("21+3 non entra.");
+            }
+        }
+        lastSideBetSummary = summary.toString();
+    }
+
+    private int perfectPairsOdds(Card first, Card second) {
+        if (!first.rank.equals(second.rank)) {
+            return 0;
+        }
+        if (first.suit == second.suit) {
+            return 25;
+        }
+        if (first.isRed() == second.isRed()) {
+            return 12;
+        }
+        return 6;
+    }
+
+    private int twentyOneThreeOdds(Card first, Card second, Card dealer) {
+        boolean flush = first.suit == second.suit && first.suit == dealer.suit;
+        boolean trips = first.rank.equals(second.rank) && first.rank.equals(dealer.rank);
+        boolean straight = isThreeCardStraight(first, second, dealer);
+        if (trips && flush) {
+            return 100;
+        }
+        if (straight && flush) {
+            return 40;
+        }
+        if (trips) {
+            return 30;
+        }
+        if (straight) {
+            return 10;
+        }
+        if (flush) {
+            return 5;
+        }
+        return 0;
+    }
+
+    private boolean isThreeCardStraight(Card a, Card b, Card c) {
+        int[] values = {rankValue(a.rank), rankValue(b.rank), rankValue(c.rank)};
+        java.util.Arrays.sort(values);
+        if (values[0] == values[1] || values[1] == values[2]) {
+            return false;
+        }
+        if (values[0] == 2 && values[1] == 3 && values[2] == 14) {
+            return true;
+        }
+        return values[0] + 1 == values[1] && values[1] + 1 == values[2];
+    }
+
+    private int rankValue(String rank) {
+        if ("A".equals(rank)) return 14;
+        if ("K".equals(rank)) return 13;
+        if ("Q".equals(rank)) return 12;
+        if ("J".equals(rank)) return 11;
+        return Integer.parseInt(rank);
+    }
+
+    private String handText(ArrayList<Card> hand) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < hand.size(); i++) {
+            if (i > 0) {
+                builder.append(' ');
+            }
+            builder.append(hand.get(i).label());
+        }
+        return builder.toString();
+    }
+
+    private void recordAchievement(String text) {
+        if (achievements.add(text)) {
+            log("Trofeo sbloccato: " + text + ".");
+        }
+    }
+
     private Card drawCard() {
-        if (shoe.size() <= NUM_DECKS * 52 / 2) {
-            shoe = Card.buildShoe(NUM_DECKS, random);
+        if (shoe.size() <= rules.decks * 52 / 2) {
+            shoe = Card.buildShoe(rules.decks, random);
             usedCards = 0;
             log("Mazzo rimischiato automaticamente.");
         }
@@ -696,5 +1121,22 @@ final class BlackjackGame {
             this.message = message;
             this.delayMs = delayMs;
         }
+    }
+
+    static final class Rules {
+        static final String[] TABLE_NAMES = {"Classic", "VIP", "High Roller"};
+        static final int[] TABLE_MIN_BETS = {10, 50, 100};
+        static final int[] TABLE_MAX_BETS = {500, 2000, 5000};
+        static final int[] TABLE_SIDE_MAX = {50, 150, 300};
+        static final int[] TABLE_UNLOCKS = {0, 1000, 2500};
+
+        int decks = NUM_DECKS;
+        boolean blackjackPaysSixToFive;
+        boolean dealerHitsSoft17;
+        boolean surrenderEnabled = true;
+        boolean doubleAfterSplit = true;
+        int minBet = MIN_BET;
+        int maxBet = 500;
+        int maxSideBet = 50;
     }
 }

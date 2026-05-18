@@ -13,6 +13,9 @@ jobs:
   build-release:
     name: Build and publish APK
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: ${{ runner.temp }}/android-sdk
+      ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
 
     steps:
       - name: Checkout repository
@@ -24,14 +27,30 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK packages
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$RUNNER_TEMP/android-sdk}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            curl -fsSL \
+              -o "$RUNNER_TEMP/android-commandline-tools.zip" \
+              "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            rm -rf "$RUNNER_TEMP/android-commandline-tools" "$SDK_ROOT/cmdline-tools/latest"
+            mkdir -p "$RUNNER_TEMP/android-commandline-tools"
+            unzip -q "$RUNNER_TEMP/android-commandline-tools.zip" -d "$RUNNER_TEMP/android-commandline-tools"
+            mv "$RUNNER_TEMP/android-commandline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+          fi
+
+          printf '%s\n' \
+            "$SDK_ROOT/cmdline-tools/latest/bin" \
+            "$SDK_ROOT/platform-tools" \
+            "$SDK_ROOT/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Build APK
         working-directory: android

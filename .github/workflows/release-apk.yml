@@ -57,13 +57,6 @@ jobs:
         shell: bash
         run: ./build-apk.sh
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: blackjack-royal-apk
-          path: android/build/outputs/blackjack-royal.apk
-          if-no-files-found: error
-
       - name: Prepare release asset
         id: release_info
         shell: bash

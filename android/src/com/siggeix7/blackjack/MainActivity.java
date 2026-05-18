@@ -295,8 +295,9 @@ public final class MainActivity extends Activity {
         hud.setElevation(dp(8));
         hud.addView(statusChip("Saldo", BlackjackGame.money(game.human.balance)), weighted(1f, dp(3), 0, dp(3), 0));
         hud.addView(statusChip("Puntata", BlackjackGame.money(game.currentBet)), weighted(1f, dp(3), 0, dp(3), 0));
+        hud.addView(statusChip("Tavolo", game.tableName()), weighted(1f, dp(3), 0, dp(3), 0));
         hud.addView(statusChip("Banco", BlackjackGame.money(game.dealerBankroll)), weighted(1f, dp(3), 0, dp(3), 0));
-        tableLayer.addView(hud, anchoredParams(dp(compact() ? 330 : 500), ViewGroup.LayoutParams.WRAP_CONTENT,
+        tableLayer.addView(hud, anchoredParams(dp(compact() ? 410 : 620), ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.TOP | Gravity.RIGHT, 0, dp(compact() ? 8 : 16), dp(compact() ? 8 : 18), 0));
     }
 
@@ -333,6 +334,12 @@ public final class MainActivity extends Activity {
         }), miniButtonParams());
         menu.addView(tinyButton("Trofei", 0xDF233A5E, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); showAchievementsDialog(); }
+        }), miniButtonParams());
+        menu.addView(tinyButton("Missioni", 0xDF233A5E, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showMissionsDialog(); }
+        }), miniButtonParams());
+        menu.addView(tinyButton("Guida", 0xDF123143, new View.OnClickListener() {
+            @Override public void onClick(View v) { feedback(v); showGuideDialog(); }
         }), miniButtonParams());
         menu.addView(tinyButton("Profili", 0xDF123143, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); showProfilesDialog(); }
@@ -1178,6 +1185,14 @@ public final class MainActivity extends Activity {
         showInfoDialog("Trofei", game.achievementsText());
     }
 
+    private void showMissionsDialog() {
+        showInfoDialog("Missioni", game.missionsText());
+    }
+
+    private void showGuideDialog() {
+        showInfoDialog("Guida rapida", game.guideText());
+    }
+
     private void showRulesDialog() {
         final Dialog dialog = new Dialog(this);
         LinearLayout box = dialogBox();
@@ -1625,8 +1640,8 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout.LayoutParams miniButtonParams() {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(compact() ? 62 : 80), dp(compact() ? 26 : 31));
-        params.setMargins(0, 0, 0, dp(4));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(compact() ? 64 : 82), dp(compact() ? 23 : 28));
+        params.setMargins(0, 0, 0, dp(3));
         return params;
     }
 

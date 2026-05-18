@@ -668,6 +668,10 @@ final class BlackjackGame {
             bestBalance = human.balance;
             recordAchievement("Nuovo record saldo");
         }
+        String missionBonus = evaluateMissions();
+        if (missionBonus.length() > 0) {
+            summary.append('\n').append(missionBonus);
+        }
         summary.append('\n').append("Netto mano: ").append(humanRoundNet >= 0 ? "+" : "").append(money(humanRoundNet));
         summary.append('\n').append("Saldo: ").append(money(human.balance));
         lastRoundSummary = summary.toString();
@@ -872,15 +876,53 @@ final class BlackjackGame {
     }
 
     String achievementsText() {
-        if (achievements.isEmpty()) {
-            return "Nessun trofeo ancora. Vinci una mano per iniziare.";
-        }
         StringBuilder builder = new StringBuilder();
         int index = 1;
         for (String achievement : achievements) {
+            if (achievement.startsWith("Missione:")) {
+                continue;
+            }
             builder.append(index++).append(". ").append(achievement).append('\n');
         }
+        if (builder.length() == 0) {
+            return "Nessun trofeo ancora. Vinci una mano per iniziare.";
+        }
         return builder.toString();
+    }
+
+    String missionsText() {
+        StringBuilder builder = new StringBuilder();
+        appendMission(builder, "blackjack", "Blackjack naturale", "Ottieni almeno un Blackjack.", 50,
+            human.stats.blackjacks > 0);
+        appendMission(builder, "streak3", "Serie calda", "Vinci 3 mani nette consecutive.", 75,
+            winStreak >= 3);
+        appendMission(builder, "sidebet", "Scommessa speciale", "Vinci una side bet Perfect Pairs o 21+3.", 125,
+            human.stats.sideBetsWon > 0);
+        appendMission(builder, "bigwin", "Colpo grosso", "Chiudi una mano con almeno " + money(Math.max(100, rules.minBet * 5)) + " di profitto.", 100,
+            lastRoundNet >= Math.max(100, rules.minBet * 5));
+        appendMission(builder, "hands25", "Veterano", "Gioca 25 mani complessive.", 150,
+            human.stats.hands >= 25);
+        appendMission(builder, "vip", "Accesso VIP", "Sblocca o entra al tavolo VIP.", 150,
+            human.balance >= Rules.TABLE_UNLOCKS[1] || tableIndex >= 1);
+        appendMission(builder, "highroller", "High Roller", "Sblocca o entra al tavolo High Roller.", 300,
+            human.balance >= Rules.TABLE_UNLOCKS[2] || tableIndex >= 2);
+        appendMission(builder, "bankhit", "Banco sotto pressione", "Porta il banco sotto " + money(9000) + ".", 100,
+            dealerBankroll <= 9000);
+        return builder.toString();
+    }
+
+    String guideText() {
+        return "Obiettivo\n"
+            + "Arriva piu' vicino possibile a 21 senza sballare e batti il banco. Il Blackjack naturale paga "
+            + (rules.blackjackPaysSixToFive ? "6:5" : "3:2") + ".\n\n"
+            + "Comandi\n"
+            + "Pesca: prendi una carta. Stai: chiudi la mano. Raddoppia: raddoppi puntata e ricevi una sola carta. Dividi: separi coppie uguali. Arrenditi: recuperi meta' puntata se la regola e' attiva.\n\n"
+            + "Side bets\n"
+            + "Perfect Pairs guarda le prime due carte: coppia mista 6:1, colorata 12:1, perfetta 25:1. 21+3 usa le tue due carte e la carta scoperta del banco: colore 5:1, scala 10:1, tris 30:1, scala colore 40:1, tris suited 100:1.\n\n"
+            + "Strategia rapida\n"
+            + "Stai con 17+. Raddoppia spesso con 11. Dividi sempre Assi e 8, mai i 10. Con 12-16 stai se il banco mostra 2-6, altrimenti pesca o valuta surrender.\n\n"
+            + "Carriera\n"
+            + "Aumenta saldo e trofei per sbloccare tavoli con puntate piu' alte. Le missioni danno bonus credito una sola volta per profilo.";
     }
 
     String exportAchievements() {
@@ -951,6 +993,55 @@ final class BlackjackGame {
     private int maxMainBetAllowed() {
         int available = human == null ? rules.maxBet : human.balance - sideBetPairs - sideBetTwentyOneThree;
         return Math.max(rules.minBet, Math.min(rules.maxBet, available));
+    }
+
+    private void appendMission(StringBuilder builder, String id, String title, String description, int reward, boolean ready) {
+        boolean done = isMissionDone(id);
+        builder.append(done ? "[OK] " : ready ? "[Pronta] " : "[ ] ")
+            .append(title)
+            .append(" - premio ").append(money(reward))
+            .append('\n')
+            .append(description)
+            .append('\n')
+            .append(done ? "Completata" : ready ? "Si completa alla prossima risoluzione mano." : "In corso")
+            .append("\n\n");
+    }
+
+    private String evaluateMissions() {
+        StringBuilder builder = new StringBuilder();
+        completeMission(builder, "blackjack", "Blackjack naturale", 50, human.stats.blackjacks > 0);
+        completeMission(builder, "streak3", "Serie calda", 75, winStreak >= 3);
+        completeMission(builder, "sidebet", "Scommessa speciale", 125, human.stats.sideBetsWon > 0);
+        completeMission(builder, "bigwin", "Colpo grosso", 100, lastRoundNet >= Math.max(100, rules.minBet * 5));
+        completeMission(builder, "hands25", "Veterano", 150, human.stats.hands >= 25);
+        completeMission(builder, "vip", "Accesso VIP", 150, human.balance >= Rules.TABLE_UNLOCKS[1] || tableIndex >= 1);
+        completeMission(builder, "highroller", "High Roller", 300, human.balance >= Rules.TABLE_UNLOCKS[2] || tableIndex >= 2);
+        completeMission(builder, "bankhit", "Banco sotto pressione", 100, dealerBankroll <= 9000);
+        if (builder.length() == 0) {
+            return "";
+        }
+        return "Missioni completate:" + builder.toString();
+    }
+
+    private void completeMission(StringBuilder builder, String id, String title, int reward, boolean condition) {
+        if (!condition || isMissionDone(id)) {
+            return;
+        }
+        achievements.add(missionKey(id));
+        human.balance += reward;
+        if (human.balance > bestBalance) {
+            bestBalance = human.balance;
+        }
+        builder.append('\n').append(title).append(" +").append(money(reward));
+        log("Missione completata: " + title + " (+" + money(reward) + ").");
+    }
+
+    private boolean isMissionDone(String id) {
+        return achievements.contains(missionKey(id));
+    }
+
+    private String missionKey(String id) {
+        return "Missione:" + id;
     }
 
     private void settleSideBets() {

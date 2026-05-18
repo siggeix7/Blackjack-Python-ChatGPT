@@ -5,7 +5,6 @@ import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -46,17 +45,17 @@ import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final String PREFS = "blackjack_royal";
-    private static final int FELT_DARK = 0xFF06241B;
-    private static final int FELT = 0xFF08735F;
-    private static final int PANEL = 0xE7071B14;
-    private static final int PANEL_SOFT = 0x8C061B14;
-    private static final int GOLD = 0xFFD6AF4D;
-    private static final int GOLD_DARK = 0xFFA77A30;
-    private static final int BLUE = 0xFF1F5D79;
-    private static final int GREEN = 0xFF207A58;
-    private static final int RED = 0xFFC52845;
-    private static final int TEXT = 0xFFF8F3E4;
-    private static final int MUTED = 0xFFD0D9D0;
+    private static final int FELT_DARK = 0xFF050811;
+    private static final int PANEL = 0xEA0B101B;
+    private static final int GOLD = 0xFFFFC85A;
+    private static final int GOLD_DARK = 0xFFE1912F;
+    private static final int BLUE = 0xFF2563EB;
+    private static final int GREEN = 0xFF14B878;
+    private static final int RED = 0xFFE5485E;
+    private static final int TEXT = 0xFFF8FBFF;
+    private static final int MUTED = 0xFFB8C5D6;
+    private static final int CYAN = 0xFF32D5FF;
+    private static final int VIOLET = 0xFF9C5CFF;
 
     private SharedPreferences prefs;
     private BlackjackGame game;
@@ -185,8 +184,9 @@ public final class MainActivity extends Activity {
         actionDock = new LinearLayout(this);
         actionDock.setOrientation(LinearLayout.VERTICAL);
         actionDock.setGravity(Gravity.CENTER);
-        actionDock.setPadding(dp(10), dp(8), dp(10), dp(8));
-        actionDock.setBackground(roundRect(PANEL, GOLD_DARK, dp(18), dp(1)));
+        actionDock.setPadding(dp(12), dp(9), dp(12), dp(9));
+        actionDock.setBackground(gradientRect(PANEL, 0xF10E1726, 0x5532D5FF, dp(22), dp(1)));
+        actionDock.setElevation(dp(16));
         root.addView(actionDock, dockParams());
 
         logTicker = new TextView(this);
@@ -195,8 +195,8 @@ public final class MainActivity extends Activity {
         logTicker.setSingleLine(true);
         logTicker.setEllipsize(TextUtils.TruncateAt.START);
         logTicker.setGravity(Gravity.CENTER);
-        logTicker.setPadding(dp(10), dp(4), dp(10), dp(4));
-        logTicker.setBackground(roundRect(0x80030F0B, 0x335A765F, dp(10), dp(1)));
+        logTicker.setPadding(dp(12), dp(5), dp(12), dp(5));
+        logTicker.setBackground(roundRect(0x7B050A12, 0x334DB6FF, dp(14), dp(1)));
 
         setContentView(root);
     }
@@ -236,27 +236,54 @@ public final class MainActivity extends Activity {
     }
 
     private void addTitle() {
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);
+        brand.setPadding(dp(14), dp(9), dp(14), dp(10));
+        brand.setBackground(gradientRect(0xD80A1220, 0xA80F2334, 0x6632D5FF, dp(18), dp(1)));
+        brand.setElevation(dp(10));
+
+        TextView overline = new TextView(this);
+        overline.setText("LIVE TABLE");
+        overline.setTextColor(CYAN);
+        overline.setTextSize(compact() ? 8 : 10);
+        overline.setTypeface(Typeface.DEFAULT_BOLD);
+        overline.setLetterSpacing(0.22f);
+        overline.setGravity(Gravity.LEFT);
+        brand.addView(overline, fullWidth(0, 0, 0, 0));
+
         TextView title = new TextView(this);
-        title.setText("BLACKJACK ROYAL");
+        title.setText("BLACKJACK");
         title.setTextColor(TEXT);
-        title.setTextSize(compact() ? 18 : 28);
-        title.setTypeface(Typeface.create("serif", Typeface.BOLD));
-        title.setLetterSpacing(0.06f);
-        title.setShadowLayer(dp(4), 0, dp(2), 0xAA000000);
-        title.setGravity(Gravity.CENTER);
-        tableLayer.addView(title, absParams(dp(compact() ? 230 : 420), ViewGroup.LayoutParams.WRAP_CONTENT,
-            dp(compact() ? 10 : 22), dp(compact() ? 6 : 12)));
+        title.setTextSize(compact() ? 22 : 34);
+        title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        title.setLetterSpacing(0.08f);
+        title.setShadowLayer(dp(8), 0, dp(3), 0xCC000000);
+        title.setGravity(Gravity.LEFT);
+        brand.addView(title, fullWidth(0, 0, 0, 0));
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Royal neon room");
+        subtitle.setTextColor(MUTED);
+        subtitle.setTextSize(compact() ? 9 : 11);
+        subtitle.setGravity(Gravity.LEFT);
+        brand.addView(subtitle, fullWidth(0, 0, 0, 0));
+
+        tableLayer.addView(brand, anchoredParams(dp(compact() ? 190 : 292), ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP | Gravity.LEFT, dp(compact() ? 8 : 18), dp(compact() ? 8 : 16), 0, 0));
     }
 
     private void addTopHud() {
         LinearLayout hud = new LinearLayout(this);
         hud.setOrientation(LinearLayout.HORIZONTAL);
         hud.setGravity(Gravity.CENTER);
+        hud.setPadding(dp(5), dp(5), dp(5), dp(5));
+        hud.setBackground(roundRect(0x8A050A12, 0x3332D5FF, dp(20), dp(1)));
+        hud.setElevation(dp(8));
         hud.addView(statusChip("Saldo", BlackjackGame.money(game.human.balance)), weighted(1f, dp(3), 0, dp(3), 0));
         hud.addView(statusChip("Puntata", BlackjackGame.money(game.currentBet)), weighted(1f, dp(3), 0, dp(3), 0));
         hud.addView(statusChip("Banco", BlackjackGame.money(game.dealerBankroll)), weighted(1f, dp(3), 0, dp(3), 0));
-        tableLayer.addView(hud, anchoredParams(dp(compact() ? 310 : 470), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP | Gravity.RIGHT, 0, dp(compact() ? 8 : 14), dp(compact() ? 10 : 18), 0));
+        tableLayer.addView(hud, anchoredParams(dp(compact() ? 330 : 500), ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP | Gravity.RIGHT, 0, dp(compact() ? 8 : 16), dp(compact() ? 8 : 18), 0));
     }
 
     private TextView statusChip(String label, String value) {
@@ -266,26 +293,29 @@ public final class MainActivity extends Activity {
         chip.setTextSize(compact() ? 10 : 12);
         chip.setTypeface(Typeface.DEFAULT_BOLD);
         chip.setGravity(Gravity.CENTER);
-        chip.setPadding(dp(8), dp(6), dp(8), dp(6));
-        chip.setBackground(roundRect(0xD70A3A2B, GOLD_DARK, dp(16), dp(1)));
+        chip.setPadding(dp(9), dp(7), dp(9), dp(7));
+        chip.setBackground(gradientRect(0xE60E1726, 0xD80C2530, 0x5532D5FF, dp(15), dp(1)));
         return chip;
     }
 
     private void addMiniMenu() {
         LinearLayout menu = new LinearLayout(this);
-        menu.setOrientation(LinearLayout.HORIZONTAL);
+        menu.setOrientation(LinearLayout.VERTICAL);
         menu.setGravity(Gravity.CENTER);
-        menu.addView(tinyButton("Stats", 0xCC24483A, new View.OnClickListener() {
+        menu.setPadding(dp(6), dp(6), dp(6), dp(2));
+        menu.setBackground(roundRect(0x91050A12, 0x334DB6FF, dp(18), dp(1)));
+        menu.setElevation(dp(9));
+        menu.addView(tinyButton("Stats", 0xDF123143, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); showStatsDialog(); }
         }), miniButtonParams());
-        menu.addView(tinyButton("Hall", 0xCC24483A, new View.OnClickListener() {
+        menu.addView(tinyButton("Hall", 0xDF1B2545, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); showHallDialog(); }
         }), miniButtonParams());
-        menu.addView(tinyButton("Reset", 0xCC653323, new View.OnClickListener() {
+        menu.addView(tinyButton("Reset", 0xDF642235, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); confirmNewGame(); }
         }), miniButtonParams());
-        tableLayer.addView(menu, absParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            dp(compact() ? 12 : 24), dp(compact() ? 52 : 70)));
+        tableLayer.addView(menu, anchoredParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.LEFT | Gravity.CENTER_VERTICAL, dp(compact() ? 8 : 18), 0, 0, dp(compact() ? 20 : 34)));
     }
 
     private void addDealerSeat() {
@@ -299,10 +329,10 @@ public final class MainActivity extends Activity {
             state = "carta coperta";
         }
         LinearLayout seat = seatPanel(game.phase == BlackjackGame.Phase.DEALER_TURN, true);
-        seat.addView(seatTitle("Mazziere - " + state));
+        seat.addView(seatTitle("BANCO // " + state));
         addCardStrip(seat, game.dealerHand, !reveal && game.dealerHand.size() > 1, true, "dealer");
         tableLayer.addView(seat, anchoredParams(dealerWidth(), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, dp(compact() ? 52 : 76), 0, 0));
+            Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, dp(compact() ? 64 : 94), 0, 0));
     }
 
     private void addCpuSeats() {
@@ -338,10 +368,13 @@ public final class MainActivity extends Activity {
         msg.setTextSize(compact() ? 12 : 15);
         msg.setTypeface(Typeface.DEFAULT_BOLD);
         msg.setGravity(Gravity.CENTER);
-        msg.setPadding(dp(12), dp(7), dp(12), dp(7));
-        msg.setBackground(roundRect(0x9E061711, GOLD_DARK, dp(14), dp(1)));
+        msg.setSingleLine(true);
+        msg.setEllipsize(TextUtils.TruncateAt.END);
+        msg.setPadding(dp(16), dp(9), dp(16), dp(9));
+        msg.setBackground(gradientRect(0xD90B1020, 0xC10D2630, 0x6658E3FF, dp(20), dp(1)));
+        msg.setElevation(dp(12));
         tableLayer.addView(msg, anchoredParams(messageWidth(), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.CENTER, 0, 0, 0, dp(compact() ? 22 : 42)));
+            Gravity.CENTER, 0, 0, 0, dp(compact() ? 8 : 18)));
         if (animateCurrentRender) {
             animatePanelEntry(msg, 0);
         }
@@ -368,8 +401,8 @@ public final class MainActivity extends Activity {
 
     private LinearLayout playerSeat(Player player, boolean human, boolean active, String keyPrefix) {
         LinearLayout seat = seatPanel(active, false);
-        String role = human ? "Tu" : shortDifficulty(player.difficulty);
-        seat.addView(seatTitle(player.name + " - " + role + " - " + BlackjackGame.money(player.balance)));
+        String role = human ? "TU" : shortDifficulty(player.difficulty).toUpperCase(Locale.ITALY);
+        seat.addView(seatTitle(role + " // " + player.name + " // " + BlackjackGame.money(player.balance)));
 
         HorizontalScrollView handsScroll = new HorizontalScrollView(this);
         handsScroll.setHorizontalScrollBarEnabled(false);
@@ -384,8 +417,8 @@ public final class MainActivity extends Activity {
             LinearLayout handBox = new LinearLayout(this);
             handBox.setOrientation(LinearLayout.VERTICAL);
             handBox.setGravity(Gravity.CENTER);
-            handBox.setPadding(dp(4), 0, dp(4), dp(3));
-            handBox.setBackground(roundRect(0x22000000, 0x99F4F1E6, dp(7), dp(1)));
+            handBox.setPadding(dp(5), dp(2), dp(5), dp(4));
+            handBox.setBackground(roundRect(0x36101826, 0x554DB6FF, dp(12), dp(1)));
             handBox.addView(handLabel(player, human, h));
             addCardStrip(handBox, player.hands.get(h), false, !human, keyPrefix + h);
             LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(handWidth(human), ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -425,10 +458,12 @@ public final class MainActivity extends Activity {
         }
         String turn = human && game.phase == BlackjackGame.Phase.PLAYER_TURN && handIndex == game.activeHandIndex ? " *" : "";
         TextView label = new TextView(this);
-        label.setText("M" + (handIndex + 1) + turn + "  " + state + "  " + BlackjackGame.money(player.bets.get(handIndex).intValue()));
+        label.setText("MANO " + (handIndex + 1) + turn + "  |  " + state + "  |  " + BlackjackGame.money(player.bets.get(handIndex).intValue()));
         label.setTextColor(MUTED);
         label.setTextSize(compact() ? 9 : 11);
         label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+        label.setEllipsize(TextUtils.TruncateAt.END);
         return label;
     }
 
@@ -437,10 +472,11 @@ public final class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setGravity(Gravity.CENTER);
         panel.setPadding(dp(compact() ? 6 : 8), dp(compact() ? 5 : 7), dp(compact() ? 6 : 8), dp(compact() ? 5 : 7));
-        int fill = dealer ? 0x98041611 : active ? 0xB91F7A52 : 0x4A041611;
-        int stroke = active ? GOLD : dealer ? 0x8892A494 : 0x77FFFFFF;
-        panel.setBackground(roundRect(fill, stroke, dp(15), dp(1)));
-        panel.setElevation(active ? dp(10) : dp(4));
+        int fillStart = dealer ? 0xB20A1220 : active ? 0xE30D3443 : 0x75101826;
+        int fillEnd = dealer ? 0x95102034 : active ? 0xD41B2850 : 0x64100F1D;
+        int stroke = active ? CYAN : dealer ? 0x88FFC85A : 0x554DB6FF;
+        panel.setBackground(gradientRect(fillStart, fillEnd, stroke, dp(18), dp(active ? 2 : 1)));
+        panel.setElevation(active ? dp(15) : dp(7));
         return panel;
     }
 
@@ -453,7 +489,8 @@ public final class MainActivity extends Activity {
         title.setGravity(Gravity.CENTER);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.END);
-        title.setPadding(0, 0, 0, dp(4));
+        title.setLetterSpacing(0.05f);
+        title.setPadding(dp(2), 0, dp(2), dp(5));
         return title;
     }
 
@@ -465,6 +502,9 @@ public final class MainActivity extends Activity {
         phase.setTextSize(compact() ? 10 : 12);
         phase.setTypeface(Typeface.DEFAULT_BOLD);
         phase.setGravity(Gravity.CENTER);
+        phase.setLetterSpacing(0.08f);
+        phase.setPadding(dp(8), dp(4), dp(8), dp(4));
+        phase.setBackground(roundRect(0x65050A12, 0x244DB6FF, dp(13), dp(1)));
         actionDock.addView(phase, fullWidth(0, 0, 0, dp(3)));
 
         if (tableBusy || game.phase == BlackjackGame.Phase.DEALING
@@ -492,20 +532,20 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER);
-        row.addView(dockText("Puntata: " + BlackjackGame.money(game.currentBet)), weighted(1.35f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("-10", 0xFF31473C, new View.OnClickListener() {
+        row.addView(dockText("Puntata " + BlackjackGame.money(game.currentBet)), weighted(1.35f, dp(2), 0, dp(2), dp(4)));
+        row.addView(actionButton("-10", 0xFF1B2636, new View.OnClickListener() {
             @Override public void onClick(View v) { game.changeBet(-10); feedback(v); render(); }
         }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("+10", 0xFF31473C, new View.OnClickListener() {
+        row.addView(actionButton("+10", 0xFF1B2636, new View.OnClickListener() {
             @Override public void onClick(View v) { game.changeBet(10); feedback(v); render(); }
         }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("+25", 0xFF31473C, new View.OnClickListener() {
+        row.addView(actionButton("+25", 0xFF1B2636, new View.OnClickListener() {
             @Override public void onClick(View v) { game.changeBet(25); feedback(v); render(); }
         }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("Max", 0xFF31473C, new View.OnClickListener() {
+        row.addView(actionButton("Max", 0xFF233A5E, new View.OnClickListener() {
             @Override public void onClick(View v) { game.setMaxBet(); feedback(v); render(); }
         }), weighted(0.8f, dp(2), 0, dp(2), dp(4)));
-        Button deal = actionButton(game.phase == BlackjackGame.Phase.ROUND_OVER ? "Nuova mano" : "Distribuisci", GOLD_DARK, new View.OnClickListener() {
+        Button deal = actionButton(game.phase == BlackjackGame.Phase.ROUND_OVER ? "Nuova mano" : "Deal", GOLD_DARK, new View.OnClickListener() {
             @Override public void onClick(View v) {
                 feedback(v);
                 if (game.prepareRound()) {
@@ -531,7 +571,7 @@ public final class MainActivity extends Activity {
         });
         yes.setEnabled(maxInsurance > 0);
         row.addView(yes, weighted(1f, dp(2), 0, dp(2), 0));
-        row.addView(actionButton("No", 0xFF31473C, new View.OnClickListener() {
+        row.addView(actionButton("No", 0xFF1B2636, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); game.answerInsurance(false); afterGameAction(); }
         }), weighted(0.75f, dp(2), 0, dp(2), 0));
         actionDock.addView(row, fullWidth(0, 0, 0, 0));
@@ -541,12 +581,12 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER);
-        Button hit = actionButton("Carta", GREEN, new View.OnClickListener() {
+        Button hit = actionButton("Pesca", GREEN, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); game.hit(); afterGameAction(); }
         });
         hit.setEnabled(game.canHit());
         row.addView(hit, weighted(1f, dp(2), 0, dp(2), dp(4)));
-        Button stand = actionButton("Sto", 0xFF31473C, new View.OnClickListener() {
+        Button stand = actionButton("Stai", 0xFF1B2636, new View.OnClickListener() {
             @Override public void onClick(View v) { feedback(v); game.stand(); afterGameAction(); }
         });
         stand.setEnabled(game.canStand());
@@ -584,8 +624,12 @@ public final class MainActivity extends Activity {
         view.setText(text);
         view.setTextColor(MUTED);
         view.setTextSize(compact() ? 10 : 12);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
         view.setGravity(Gravity.CENTER);
-        view.setPadding(dp(8), dp(5), dp(8), dp(5));
+        view.setPadding(dp(10), dp(6), dp(10), dp(6));
+        view.setSingleLine(true);
+        view.setEllipsize(TextUtils.TruncateAt.END);
+        view.setBackground(roundRect(0x58050A12, 0x224DB6FF, dp(14), dp(1)));
         return view;
     }
 
@@ -598,13 +642,15 @@ public final class MainActivity extends Activity {
     private Button actionButton(String text, int color, View.OnClickListener listener) {
         Button button = new Button(this);
         button.setText(text);
-        button.setTextColor(Color.WHITE);
+        button.setTextColor(TEXT);
         button.setTextSize(compact() ? 10 : 12);
         button.setAllCaps(false);
         button.setMinHeight(dp(compact() ? 34 : 40));
         button.setGravity(Gravity.CENTER);
         button.setPadding(dp(6), 0, dp(6), 0);
-        button.setBackground(roundRect(color, 0x55FFFFFF, dp(13), dp(1)));
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setBackground(gradientRect(color, shade(color, 0.64f), 0x44FFFFFF, dp(15), dp(1)));
+        button.setElevation(dp(4));
         button.setOnClickListener(listener);
         return button;
     }
@@ -621,10 +667,12 @@ public final class MainActivity extends Activity {
             lastCardCounts.put(rowKey, Integer.valueOf(0));
             lastHiddenRows.put(rowKey, Boolean.valueOf(hideLast));
             TextView empty = new TextView(this);
-            empty.setText("Carte non distribuite");
+            empty.setText("Slot carte vuoto");
             empty.setTextColor(MUTED);
             empty.setTextSize(compact() ? 9 : 11);
             empty.setGravity(Gravity.CENTER);
+            empty.setPadding(dp(6), dp(8), dp(6), dp(8));
+            empty.setBackground(roundRect(0x25050A12, 0x224DB6FF, dp(10), dp(1)));
             parent.addView(empty, fullWidth(0, dp(3), 0, dp(2)));
             return;
         }
@@ -917,7 +965,7 @@ public final class MainActivity extends Activity {
         input.setHintTextColor(MUTED);
         input.setTextSize(18);
         input.setPadding(dp(12), dp(8), dp(12), dp(8));
-        input.setBackground(roundRect(0xCC10291F, GOLD_DARK, dp(10), dp(1)));
+        input.setBackground(gradientRect(0xD90B1220, 0xC60E2530, 0x6632D5FF, dp(14), dp(1)));
         box.addView(input, fullWidth(0, 0, 0, dp(12)));
         box.addView(actionButton("Siediti al tavolo", GOLD_DARK, new View.OnClickListener() {
             @Override public void onClick(View v) {
@@ -987,7 +1035,8 @@ public final class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(22), dp(18), dp(22), dp(18));
-        box.setBackground(roundRect(0xF20A1D16, GOLD_DARK, dp(20), dp(1)));
+        box.setBackground(gradientRect(0xF4080D18, 0xF3122634, 0x7732D5FF, dp(24), dp(1)));
+        box.setElevation(dp(18));
         return box;
     }
 
@@ -995,8 +1044,9 @@ public final class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText(text);
         title.setTextColor(TEXT);
-        title.setTextSize(22);
-        title.setTypeface(Typeface.create("serif", Typeface.BOLD));
+        title.setTextSize(compact() ? 20 : 24);
+        title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        title.setLetterSpacing(0.06f);
         title.setGravity(Gravity.CENTER);
         title.setPadding(0, 0, 0, dp(10));
         return title;
@@ -1006,7 +1056,7 @@ public final class MainActivity extends Activity {
         TextView message = new TextView(this);
         message.setText(text);
         message.setTextColor(MUTED);
-        message.setTextSize(15);
+        message.setTextSize(compact() ? 14 : 15);
         message.setLineSpacing(dp(2), 1f);
         message.setGravity(Gravity.CENTER);
         return message;
@@ -1169,36 +1219,36 @@ public final class MainActivity extends Activity {
     }
 
     private int dockWidth() {
-        return Math.min(dp(compact() ? 650 : 880), screenWidth() - dp(24));
+        return Math.min(dp(compact() ? 680 : 920), screenWidth() - dp(22));
     }
 
     private int dockClearance() {
-        return dp(compact() ? 116 : 146);
+        return dp(compact() ? 118 : 148);
     }
 
     private int dealerWidth() {
-        return dp(compact() ? 172 : 232);
+        return dp(compact() ? 196 : 270);
     }
 
     private int cpuWidth() {
-        return dp(compact() ? 138 : 190);
+        return dp(compact() ? 150 : 204);
     }
 
     private int humanWidth() {
-        return Math.min(dp(compact() ? 420 : 640), screenWidth() - dp(40));
+        return Math.min(dp(compact() ? 470 : 710), screenWidth() - dp(50));
     }
 
     private int handWidth(boolean human) {
-        return dp(human ? (compact() ? 150 : 210) : (compact() ? 108 : 154));
+        return dp(human ? (compact() ? 164 : 224) : (compact() ? 116 : 162));
     }
 
     private int messageWidth() {
-        return Math.min(dp(compact() ? 460 : 680), screenWidth() - dp(80));
+        return Math.min(dp(compact() ? 500 : 730), screenWidth() - dp(96));
     }
 
     private int cardWidth(boolean small) {
-        if (small) return dp(compact() ? 32 : 48);
-        return dp(compact() ? 44 : 64);
+        if (small) return dp(compact() ? 34 : 50);
+        return dp(compact() ? 46 : 68);
     }
 
     private int cardWidthForCount(boolean small, String rowKey, int count) {
@@ -1237,10 +1287,10 @@ public final class MainActivity extends Activity {
 
     private FrameLayout.LayoutParams cpuParams(int position) {
         int width = cpuWidth();
-        if (position == 0) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, dp(18), dp(compact() ? 128 : 166), 0, 0);
-        if (position == 1) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT, 0, dp(compact() ? 128 : 166), dp(18), 0);
-        if (position == 2) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, dp(18), 0, 0, dp(compact() ? 118 : 162));
-        return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.RIGHT, 0, 0, dp(18), dp(compact() ? 118 : 162));
+        if (position == 0) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, dp(compact() ? 82 : 112), dp(compact() ? 132 : 178), 0, 0);
+        if (position == 1) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT, 0, dp(compact() ? 132 : 178), dp(compact() ? 18 : 28), 0);
+        if (position == 2) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, dp(compact() ? 46 : 74), 0, 0, dp(compact() ? 126 : 170));
+        return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.RIGHT, 0, 0, dp(compact() ? 46 : 74), dp(compact() ? 126 : 170));
     }
 
     private FrameLayout.LayoutParams absParams(int width, int height, int left, int top) {
@@ -1271,8 +1321,17 @@ public final class MainActivity extends Activity {
 
     private LinearLayout.LayoutParams miniButtonParams() {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(compact() ? 58 : 74), dp(compact() ? 30 : 34));
-        params.setMargins(0, 0, dp(6), 0);
+        params.setMargins(0, 0, 0, dp(5));
         return params;
+    }
+
+    private GradientDrawable gradientRect(int start, int end, int stroke, int radius, int strokeWidth) {
+        GradientDrawable drawable = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[] {start, end});
+        drawable.setCornerRadius(radius);
+        if (stroke != 0 && strokeWidth > 0) {
+            drawable.setStroke(strokeWidth, stroke);
+        }
+        return drawable;
     }
 
     private GradientDrawable roundRect(int fill, int stroke, int radius, int strokeWidth) {
@@ -1283,6 +1342,14 @@ public final class MainActivity extends Activity {
             drawable.setStroke(strokeWidth, stroke);
         }
         return drawable;
+    }
+
+    private int shade(int color, float factor) {
+        int alpha = (color >>> 24) & 0xFF;
+        int red = Math.min(255, Math.max(0, (int) (((color >>> 16) & 0xFF) * factor)));
+        int green = Math.min(255, Math.max(0, (int) (((color >>> 8) & 0xFF) * factor)));
+        int blue = Math.min(255, Math.max(0, (int) ((color & 0xFF) * factor)));
+        return (alpha << 24) | (red << 16) | (green << 8) | blue;
     }
 
     private int dp(int value) {
@@ -1299,6 +1366,7 @@ public final class MainActivity extends Activity {
 
     private static final class RoomBackgroundView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
 
         RoomBackgroundView(Context context) {
             super(context);
@@ -1309,26 +1377,61 @@ public final class MainActivity extends Activity {
             int w = getWidth();
             int h = getHeight();
             long now = System.currentTimeMillis();
-            float sweep = (now % 7000L) / 7000f;
-            paint.setShader(new LinearGradient(0, 0, 0, h, 0xFF151C19, 0xFF08251C, Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, paint);
-            paint.setShader(null);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(1f);
-            paint.setColor(0x13000000);
-            int step = Math.max(20, w / 30);
-            for (int x = -w; x < w * 2; x += step) {
-                canvas.drawLine(x, 0, x + h, h, paint);
-                canvas.drawLine(x, h, x + h, 0, paint);
-            }
-            float highlightX = -w * 0.35f + sweep * w * 1.7f;
+            float sweep = (now % 9000L) / 9000f;
+
             paint.setStyle(Paint.Style.FILL);
-            paint.setShader(new LinearGradient(highlightX - w * 0.12f, 0, highlightX + w * 0.12f, h,
-                0x00FFFFFF, 0x16D9B861, Shader.TileMode.CLAMP));
+            paint.setShader(new LinearGradient(0, 0, 0, h, 0xFF10172A, 0xFF03050B, Shader.TileMode.CLAMP));
             canvas.drawRect(0, 0, w, h, paint);
             paint.setShader(null);
-            paint.setColor(0x18FFFFFF);
-            canvas.drawCircle(w * 0.14f, h * 0.08f, Math.max(40f, w * 0.10f), paint);
+
+            paint.setColor(0xFF05070D);
+            path.reset();
+            path.moveTo(0, h * 0.60f);
+            path.lineTo(w, h * 0.50f);
+            path.lineTo(w, h);
+            path.lineTo(0, h);
+            path.close();
+            canvas.drawPath(path, paint);
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(1f, w * 0.0014f));
+            paint.setColor(0x1932D5FF);
+            int panels = 7;
+            for (int i = 0; i <= panels; i++) {
+                float x = i * w / (float) panels;
+                canvas.drawLine(x, 0, x - w * 0.05f, h * 0.58f, paint);
+            }
+
+            paint.setStrokeWidth(Math.max(1f, w * 0.001f));
+            paint.setColor(0x17FFFFFF);
+            for (int i = 0; i < 12; i++) {
+                float y = h * 0.62f + i * h * 0.044f;
+                canvas.drawLine(-w * 0.08f, y, w * 1.08f, y + i * h * 0.012f, paint);
+            }
+            for (int i = -4; i <= 4; i++) {
+                float x = w * 0.50f + i * w * 0.11f;
+                canvas.drawLine(x, h * 0.58f, w * 0.50f + i * w * 0.26f, h, paint);
+            }
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0x2A9C5CFF);
+            canvas.drawCircle(w * 0.18f, h * 0.20f, Math.max(80f, w * 0.16f), paint);
+            paint.setColor(0x2032D5FF);
+            canvas.drawCircle(w * 0.82f, h * 0.16f, Math.max(90f, w * 0.18f), paint);
+
+            float highlightX = -w * 0.30f + sweep * w * 1.6f;
+            paint.setShader(new LinearGradient(highlightX - w * 0.16f, 0, highlightX + w * 0.16f, h,
+                0x0032D5FF, 0x1832D5FF, Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, paint);
+            paint.setShader(null);
+
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(Math.max(2f, w * 0.004f));
+            paint.setColor(0x55FFC85A);
+            canvas.drawArc(-w * 0.18f, h * 0.04f, w * 1.18f, h * 0.82f, 205, 130, false, paint);
+            paint.setStrokeWidth(Math.max(1f, w * 0.002f));
+            paint.setColor(0x4432D5FF);
+            canvas.drawArc(w * 0.08f, h * 0.10f, w * 0.92f, h * 0.74f, 205, 130, false, paint);
             postInvalidateOnAnimation();
         }
     }
@@ -1348,135 +1451,166 @@ public final class MainActivity extends Activity {
             int w = getWidth();
             int h = getHeight();
             long now = System.currentTimeMillis();
-            float glow = (float) Math.sin((now % 3600L) / 3600f * Math.PI * 2f) * 0.5f + 0.5f;
+            float pulse = (float) Math.sin((now % 4200L) / 4200f * Math.PI * 2f) * 0.5f + 0.5f;
 
-            table.set(-w * 0.05f, dp(22), w * 1.05f, h + dp(42));
+            table.set(w * 0.045f, h * 0.145f, w * 0.955f, h * 0.93f);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0x88000000);
-            canvas.drawOval(table.left + dp(8), table.top + dp(18), table.right + dp(8), table.bottom + dp(18), paint);
-            paint.setShader(new LinearGradient(0, table.top, 0, table.bottom, 0xFF3D2110, 0xFF936028, Shader.TileMode.CLAMP));
-            canvas.drawOval(table, paint);
+            paint.setColor(0xAA000000);
+            canvas.drawRoundRect(table.left + dp(10), table.top + dp(16), table.right + dp(10), table.bottom + dp(18), dp(90), dp(90), paint);
+            paint.setShader(new LinearGradient(table.left, table.top, table.right, table.bottom, 0xFF1A1026, 0xFF432719, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(table, dp(96), dp(96), paint);
             paint.setShader(null);
 
-            felt.set(dp(24), dp(44), w - dp(24), h - dp(28));
-            paint.setShader(new LinearGradient(0, felt.top, 0, felt.bottom, 0xFF0B7A67, 0xFF053C2F, Shader.TileMode.CLAMP));
-            canvas.drawOval(felt, paint);
+            felt.set(table.left + dp(24), table.top + dp(24), table.right - dp(24), table.bottom - dp(24));
+            paint.setShader(new LinearGradient(0, felt.top, 0, felt.bottom, 0xFF0D4E58, 0xFF071D2A, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(felt, dp(78), dp(78), paint);
             paint.setShader(null);
 
-            drawTexture(canvas, w, h);
-            drawRules(canvas, w, h, glow);
-            drawBettingLayout(canvas, w, h);
+            drawTableTexture(canvas, w, h);
+            drawDealerBand(canvas, w, h, pulse);
+            drawSeatGrid(canvas, w, h);
+            drawCenterMark(canvas, w, h, pulse);
             drawProps(canvas, w, h, now);
 
-            float sweepX = -w * 0.20f + (now % 5200L) / 5200f * w * 1.4f;
-            paint.setShader(new LinearGradient(sweepX - dp(80), 0, sweepX + dp(80), h, 0x00FFFFFF, 0x16FFFFFF, Shader.TileMode.CLAMP));
-            canvas.drawOval(felt, paint);
+            float sweepX = -w * 0.20f + (now % 5600L) / 5600f * w * 1.4f;
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new LinearGradient(sweepX - dp(90), 0, sweepX + dp(90), h, 0x00FFFFFF, 0x1432D5FF, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(felt, dp(78), dp(78), paint);
             paint.setShader(null);
             postInvalidateOnAnimation();
         }
 
-        private void drawTexture(Canvas canvas, int w, int h) {
+        private void drawTableTexture(Canvas canvas, int w, int h) {
             paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(4));
-            paint.setColor(0xE1C79A43);
-            canvas.drawOval(felt, paint);
+            paint.setStrokeWidth(dp(5));
+            paint.setColor(0xD8FFC85A);
+            canvas.drawRoundRect(felt, dp(78), dp(78), paint);
             paint.setStrokeWidth(dp(2));
-            paint.setColor(0xCAF3F0E4);
-            RectF ruleArc = new RectF(dp(72), dp(86), w - dp(72), h + dp(244));
-            canvas.drawArc(ruleArc, 197, 146, false, paint);
+            paint.setColor(0x9932D5FF);
+            canvas.drawRoundRect(felt.left + dp(10), felt.top + dp(10), felt.right - dp(10), felt.bottom - dp(10), dp(68), dp(68), paint);
             paint.setStrokeWidth(dp(1));
-            paint.setColor(0x60F9E3A0);
-            canvas.drawOval(dp(48), dp(62), w - dp(48), h - dp(54), paint);
-            paint.setColor(0x11000000);
-            int step = Math.max(dp(22), w / 28);
-            for (int x = -w; x < w * 2; x += step) {
-                canvas.drawLine(x, 0, x + h, h, paint);
-                canvas.drawLine(x, h, x + h, 0, paint);
+            paint.setColor(0x12000000);
+            int step = Math.max(dp(18), w / 34);
+            for (int x = (int) felt.left - w; x < felt.right + w; x += step) {
+                canvas.drawLine(x, felt.top, x + h, felt.bottom, paint);
+                canvas.drawLine(x, felt.bottom, x + h, felt.top, paint);
             }
         }
 
-        private void drawRules(Canvas canvas, int w, int h, float glow) {
-            RectF topArc = new RectF(dp(70), dp(88), w - dp(70), h + dp(240));
+        private void drawDealerBand(Canvas canvas, int w, int h, float pulse) {
+            RectF arc = new RectF(felt.left + dp(70), felt.top + dp(18), felt.right - dp(70), felt.bottom + dp(176));
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(0x8832D5FF + ((int) (pulse * 42f) << 24));
+            canvas.drawArc(arc, 205, 130, false, paint);
+            paint.setStrokeWidth(dp(1));
+            paint.setColor(0x99FFC85A);
+            canvas.drawArc(new RectF(arc.left + dp(28), arc.top + dp(24), arc.right - dp(28), arc.bottom - dp(12)), 208, 124, false, paint);
+
             paint.setStyle(Paint.Style.FILL);
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setFakeBoldText(true);
-            paint.setColor(0xD4D7D061);
-            paint.setTextSize(Math.max(dp(15), w * 0.024f));
+            paint.setColor(0xD9F8FBFF);
+            paint.setTextSize(Math.max(dp(12), w * 0.017f));
             path.reset();
-            path.addArc(topArc, 208, 124);
-            canvas.drawTextOnPath("BLACK JACK PAYS 3 TO 2", path, 0, -dp(18), paint);
-
-            paint.setColor(0xD8E8E072);
-            paint.setTextSize(Math.max(dp(12), w * 0.018f));
+            path.addArc(arc, 211, 118);
+            canvas.drawTextOnPath("BLACKJACK PAYS 3 TO 2", path, 0, -dp(12), paint);
+            paint.setColor(0xA8B8C5D6);
+            paint.setTextSize(Math.max(dp(9), w * 0.013f));
             path.reset();
-            path.addArc(new RectF(dp(118), dp(122), w - dp(118), h + dp(214)), 208, 124);
-            canvas.drawTextOnPath("Dealer must draw to 16, and stand on all 17's", path, 0, -dp(8), paint);
-
-            paint.setColor(0x642C1730 + ((int) (glow * 35) << 24));
-            paint.setTextSize(Math.max(dp(22), w * 0.036f));
-            canvas.drawText("INSURANCE", w / 2f, h * 0.38f, paint);
+            path.addArc(new RectF(arc.left + dp(52), arc.top + dp(42), arc.right - dp(52), arc.bottom - dp(26)), 213, 114);
+            canvas.drawTextOnPath("Dealer stands on soft 17", path, 0, -dp(6), paint);
             paint.setFakeBoldText(false);
         }
 
-        private void drawBettingLayout(Canvas canvas, int w, int h) {
+        private void drawSeatGrid(Canvas canvas, int w, int h) {
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(2));
-            paint.setColor(0xC9F4F1E6);
-            drawBox(canvas, w * 0.17f, h * 0.70f, w * 0.12f, h * 0.16f, -10f);
-            drawBox(canvas, w * 0.36f, h * 0.83f, w * 0.14f, h * 0.16f, -4f);
-            drawBox(canvas, w * 0.50f, h * 0.87f, w * 0.14f, h * 0.16f, 0f);
-            drawBox(canvas, w * 0.64f, h * 0.83f, w * 0.14f, h * 0.16f, 4f);
-            drawBox(canvas, w * 0.83f, h * 0.70f, w * 0.12f, h * 0.16f, 10f);
+            paint.setColor(0xA7F8FBFF);
+            drawSeat(canvas, w * 0.18f, h * 0.65f, w * 0.13f, h * 0.145f, -10f, "GUEST");
+            drawSeat(canvas, w * 0.34f, h * 0.78f, w * 0.14f, h * 0.15f, -4f, "HAND");
+            drawSeat(canvas, w * 0.50f, h * 0.82f, w * 0.15f, h * 0.15f, 0f, "PLAYER");
+            drawSeat(canvas, w * 0.66f, h * 0.78f, w * 0.14f, h * 0.15f, 4f, "HAND");
+            drawSeat(canvas, w * 0.82f, h * 0.65f, w * 0.13f, h * 0.145f, 10f, "GUEST");
         }
 
-        private void drawBox(Canvas canvas, float cx, float cy, float bw, float bh, float rotation) {
+        private void drawSeat(Canvas canvas, float cx, float cy, float bw, float bh, float rotation, String label) {
             canvas.save();
             canvas.rotate(rotation, cx, cy);
             RectF box = new RectF(cx - bw / 2f, cy - bh / 2f, cx + bw / 2f, cy + bh / 2f);
-            canvas.drawRoundRect(box, dp(4), dp(4), paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0x17000000);
+            canvas.drawRoundRect(box.left + dp(4), box.top + dp(5), box.right + dp(4), box.bottom + dp(5), dp(12), dp(12), paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(0x9FF8FBFF);
+            canvas.drawRoundRect(box, dp(12), dp(12), paint);
+            paint.setStrokeWidth(dp(1));
+            paint.setColor(0x6632D5FF);
+            canvas.drawRoundRect(box.left + dp(6), box.top + dp(6), box.right - dp(6), box.bottom - dp(6), dp(8), dp(8), paint);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setFakeBoldText(true);
+            paint.setTextSize(Math.max(dp(8), bw * 0.10f));
+            paint.setColor(0x72F8FBFF);
+            canvas.drawText(label, cx, cy + dp(4), paint);
+            paint.setFakeBoldText(false);
             canvas.restore();
+        }
+
+        private void drawCenterMark(Canvas canvas, int w, int h, float pulse) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setFakeBoldText(true);
+            paint.setColor(0x3032D5FF + ((int) (pulse * 28f) << 24));
+            paint.setTextSize(Math.max(dp(32), w * 0.052f));
+            canvas.drawText("21", w * 0.50f, h * 0.49f, paint);
+            paint.setColor(0xA8FFC85A);
+            paint.setTextSize(Math.max(dp(10), w * 0.014f));
+            canvas.drawText("ROYAL TABLE", w * 0.50f, h * 0.535f, paint);
+            paint.setFakeBoldText(false);
         }
 
         private void drawProps(Canvas canvas, int w, int h, long now) {
             drawShoe(canvas, w, h);
             drawDiscardPile(canvas, w, h);
             float bob = (float) Math.sin((now % 1800L) / 1800f * Math.PI * 2f) * dp(1);
-            drawChipStack(canvas, w * 0.30f, h * 0.15f + bob, new int[] {0xFF202537, 0xFF7C2AC9, 0xFF35A8D9, 0xFFF4D232});
-            drawChipStack(canvas, w * 0.13f, h * 0.86f - bob, new int[] {0xFFE08A25, 0xFFF2DC39, 0xFF6C35B8, 0xFF25293A});
-            drawChipStack(canvas, w * 0.50f, h * 0.89f + bob, new int[] {0xFF6C35B8, 0xFF202537, 0xFFF2DC39, 0xFFE08A25});
-            drawChipStack(canvas, w * 0.86f, h * 0.84f - bob, new int[] {0xFFF2DC39, 0xFF35A8D9, 0xFFE08A25, 0xFF6C35B8});
+            drawChipStack(canvas, w * 0.30f, h * 0.18f + bob, new int[] {0xFF0EA5E9, 0xFF7C3AED, 0xFFFFC85A, 0xFF0F172A});
+            drawChipStack(canvas, w * 0.14f, h * 0.83f - bob, new int[] {0xFFE5485E, 0xFFFFC85A, 0xFF2563EB, 0xFF0F172A});
+            drawChipStack(canvas, w * 0.50f, h * 0.875f + bob, new int[] {0xFF7C3AED, 0xFF0F172A, 0xFFFFC85A, 0xFF14B878});
+            drawChipStack(canvas, w * 0.86f, h * 0.82f - bob, new int[] {0xFFFFC85A, 0xFF32D5FF, 0xFFE5485E, 0xFF0F172A});
         }
 
         private void drawShoe(Canvas canvas, int w, int h) {
             canvas.save();
-            canvas.rotate(-18f, w * 0.22f, h * 0.10f);
-            RectF shoe = new RectF(w * 0.15f, h * 0.00f, w * 0.30f, h * 0.13f);
+            canvas.rotate(-12f, w * 0.22f, h * 0.12f);
+            RectF shoe = new RectF(w * 0.15f, h * 0.04f, w * 0.29f, h * 0.155f);
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(0x88000000);
-            canvas.drawRoundRect(shoe.left + dp(8), shoe.top + dp(10), shoe.right + dp(8), shoe.bottom + dp(10), dp(10), dp(10), paint);
-            paint.setShader(new LinearGradient(shoe.left, shoe.top, shoe.right, shoe.bottom, 0xFFE6E2F1, 0xFF746F86, Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(shoe.left + dp(7), shoe.top + dp(9), shoe.right + dp(7), shoe.bottom + dp(9), dp(12), dp(12), paint);
+            paint.setShader(new LinearGradient(shoe.left, shoe.top, shoe.right, shoe.bottom, 0xFF1E293B, 0xFF020617, Shader.TileMode.CLAMP));
             canvas.drawRoundRect(shoe, dp(10), dp(10), paint);
             paint.setShader(null);
-            paint.setColor(0xFFF6F0F6);
-            canvas.drawRoundRect(shoe.left + dp(10), shoe.top + dp(8), shoe.right - dp(20), shoe.bottom - dp(8), dp(5), dp(5), paint);
-            paint.setColor(0xFFD01438);
-            canvas.drawRoundRect(shoe.right - dp(44), shoe.top + dp(13), shoe.right - dp(8), shoe.bottom - dp(13), dp(4), dp(4), paint);
+            paint.setColor(0xFFEFF6FF);
+            canvas.drawRoundRect(shoe.left + dp(10), shoe.top + dp(9), shoe.right - dp(24), shoe.bottom - dp(9), dp(5), dp(5), paint);
+            paint.setColor(0xFF32D5FF);
+            canvas.drawRoundRect(shoe.right - dp(46), shoe.top + dp(14), shoe.right - dp(8), shoe.bottom - dp(14), dp(5), dp(5), paint);
             canvas.restore();
         }
 
         private void drawDiscardPile(Canvas canvas, int w, int h) {
             canvas.save();
-            canvas.rotate(8f, w * 0.80f, h * 0.10f);
+            canvas.rotate(10f, w * 0.80f, h * 0.13f);
             for (int i = 0; i < 4; i++) {
-                RectF card = new RectF(w * 0.77f + i * dp(10), h * 0.02f + i * dp(4), w * 0.84f + i * dp(10), h * 0.11f + i * dp(4));
+                RectF card = new RectF(w * 0.765f + i * dp(10), h * 0.055f + i * dp(4), w * 0.835f + i * dp(10), h * 0.145f + i * dp(4));
                 paint.setStyle(Paint.Style.FILL);
                 paint.setColor(0x66000000);
                 canvas.drawRoundRect(card.left + dp(3), card.top + dp(4), card.right + dp(3), card.bottom + dp(4), dp(4), dp(4), paint);
-                paint.setColor(0xFFD6113D);
+                paint.setColor(i % 2 == 0 ? 0xFF0EA5E9 : 0xFFE5485E);
                 canvas.drawRoundRect(card, dp(4), dp(4), paint);
                 paint.setStyle(Paint.Style.STROKE);
                 paint.setStrokeWidth(dp(1));
-                paint.setColor(0xFFFFB5C3);
+                paint.setColor(0xCCF8FBFF);
                 canvas.drawRoundRect(card.left + dp(4), card.top + dp(4), card.right - dp(4), card.bottom - dp(4), dp(3), dp(3), paint);
             }
             canvas.restore();
@@ -1493,13 +1627,16 @@ public final class MainActivity extends Activity {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(0x66000000);
             canvas.drawCircle(cx + dp(3), cy + dp(4), r, paint);
-            paint.setShader(new LinearGradient(cx - r, cy - r, cx + r, cy + r, 0xFFFFFFFF, color, Shader.TileMode.CLAMP));
+            paint.setShader(new LinearGradient(cx - r, cy - r, cx + r, cy + r, 0xFFFEF3C7, color, Shader.TileMode.CLAMP));
             canvas.drawCircle(cx, cy, r, paint);
             paint.setShader(null);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(2));
             paint.setColor(0xFFFFFFFF);
             canvas.drawCircle(cx, cy, r * 0.72f, paint);
+            paint.setStrokeWidth(dp(1));
+            paint.setColor(0xAA020617);
+            canvas.drawCircle(cx, cy, r * 0.42f, paint);
             paint.setStyle(Paint.Style.FILL);
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setFakeBoldText(true);

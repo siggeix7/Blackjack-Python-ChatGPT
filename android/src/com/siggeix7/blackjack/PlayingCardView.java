@@ -57,19 +57,25 @@ final class PlayingCardView extends View {
         float height = r.height();
         float radius = width * 0.14f;
         float stroke = Math.max(1f, width * 0.018f);
-        float leftPad = width * 0.10f;
-        float topPad = height * 0.08f;
-        float rankSize = width * (card.rank.length() > 1 ? 0.24f : 0.29f);
-        int suitColor = card.isRed() ? 0xFFC3263F : 0xFF111816;
+        float leftPad = width * 0.11f;
+        float topPad = height * 0.075f;
+        float rankSize = width * (card.rank.length() > 1 ? 0.23f : 0.30f);
+        int suitColor = card.isRed() ? 0xFFE33E55 : 0xFF111827;
+        int accent = card.isRed() ? 0xFFE5485E : 0xFF32D5FF;
 
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.WHITE, 0xFFE8E5DC, Shader.TileMode.CLAMP));
+        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, Color.WHITE, 0xFFE7EEF7, Shader.TileMode.CLAMP));
         canvas.drawRoundRect(r, radius, radius, paint);
         paint.setShader(null);
+        paint.setColor(0x17000000);
+        canvas.drawRoundRect(r.left + width * 0.05f, r.top + height * 0.48f, r.right - width * 0.05f, r.bottom - height * 0.05f, radius * 0.75f, radius * 0.75f, paint);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(stroke);
-        paint.setColor(0xFFD3C7A7);
+        paint.setColor(accent);
         canvas.drawRoundRect(r, radius, radius, paint);
+        paint.setStrokeWidth(Math.max(1f, width * 0.010f));
+        paint.setColor(0x55000000);
+        canvas.drawRoundRect(r.left + width * 0.055f, r.top + width * 0.055f, r.right - width * 0.055f, r.bottom - width * 0.055f, radius * 0.70f, radius * 0.70f, paint);
 
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(suitColor);
@@ -77,9 +83,11 @@ final class PlayingCardView extends View {
         paint.setFakeBoldText(true);
         paint.setTextSize(rankSize);
         canvas.drawText(card.rank, r.left + leftPad, r.top + topPad + rankSize * 0.82f, paint);
-        drawSuit(canvas, card.suit, r.left + leftPad + width * 0.11f, r.top + topPad + rankSize * 1.34f, width * 0.19f, suitColor);
+        drawSuit(canvas, card.suit, r.left + leftPad + width * 0.11f, r.top + topPad + rankSize * 1.34f, width * 0.18f, suitColor);
 
-        drawSuit(canvas, card.suit, r.centerX(), r.centerY() + height * 0.035f, width * 0.42f, suitColor);
+        paint.setColor(card.isRed() ? 0x1FE5485E : 0x1F0F172A);
+        canvas.drawCircle(r.centerX(), r.centerY() + height * 0.04f, width * 0.27f, paint);
+        drawSuit(canvas, card.suit, r.centerX(), r.centerY() + height * 0.04f, width * 0.43f, suitColor);
 
         canvas.save();
         canvas.rotate(180, r.centerX(), r.centerY());
@@ -96,26 +104,36 @@ final class PlayingCardView extends View {
         float height = r.height();
         float radius = width * 0.14f;
         paint.setStyle(Paint.Style.FILL);
-        paint.setShader(new LinearGradient(0, r.top, 0, r.bottom, 0xFF102B74, 0xFF7B1B5D, Shader.TileMode.CLAMP));
+        paint.setShader(new LinearGradient(r.left, r.top, r.right, r.bottom, 0xFF050A12, 0xFF1E1B4B, Shader.TileMode.CLAMP));
         canvas.drawRoundRect(r, radius, radius, paint);
         paint.setShader(null);
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(Math.max(1f, width * 0.035f));
-        paint.setColor(0xFFE8D58A);
+        paint.setStrokeWidth(Math.max(1f, width * 0.030f));
+        paint.setColor(0xFF32D5FF);
         float inset = width * 0.11f;
         canvas.drawRoundRect(r.left + inset, r.top + inset, r.right - inset, r.bottom - inset, radius * 0.72f, radius * 0.72f, paint);
-        paint.setStrokeWidth(Math.max(1f, width * 0.016f));
-        paint.setColor(0x66FFFFFF);
-        float step = height * 0.14f;
-        for (float y = r.top + height * 0.20f; y < r.bottom - height * 0.12f; y += step) {
-            canvas.drawLine(r.left + width * 0.19f, y, r.right - width * 0.19f, y + height * 0.08f, paint);
+
+        paint.setStrokeWidth(Math.max(1f, width * 0.014f));
+        paint.setColor(0x77FFC85A);
+        path.reset();
+        path.moveTo(r.centerX(), r.top + height * 0.19f);
+        path.lineTo(r.right - width * 0.22f, r.centerY());
+        path.lineTo(r.centerX(), r.bottom - height * 0.19f);
+        path.lineTo(r.left + width * 0.22f, r.centerY());
+        path.close();
+        canvas.drawPath(path, paint);
+        paint.setColor(0x5532D5FF);
+        for (int i = 0; i < 3; i++) {
+            float dx = width * (0.12f + i * 0.10f);
+            canvas.drawLine(r.left + dx, r.top + height * 0.20f, r.right - dx, r.bottom - height * 0.20f, paint);
+            canvas.drawLine(r.right - dx, r.top + height * 0.20f, r.left + dx, r.bottom - height * 0.20f, paint);
         }
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0x99FFFFFF);
+        paint.setColor(0xEAF8FBFF);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setFakeBoldText(true);
-        paint.setTextSize(width * 0.34f);
-        canvas.drawText("BJ", r.centerX(), r.centerY() + height * 0.08f, paint);
+        paint.setTextSize(width * 0.31f);
+        canvas.drawText("21", r.centerX(), r.centerY() + height * 0.08f, paint);
         paint.setFakeBoldText(false);
     }
 

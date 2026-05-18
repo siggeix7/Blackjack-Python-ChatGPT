@@ -11,7 +11,7 @@ python3 BlackJack.py
 
 ## APK Android
 
-La versione Android nativa e' nella cartella `android/`. Non richiede Gradle: lo script usa direttamente Android SDK build-tools, `javac`, `d8`, `aapt2`, `zipalign` e `apksigner`.
+La versione Android nativa ora e' `Velvet Run 64`, un platformer retro 2.5D in stile console anni '90. Non richiede Gradle: lo script usa direttamente Android SDK build-tools, `javac`, `d8`, `aapt2`, `zipalign` e `apksigner`.
 
 Guida rapida:
 
@@ -24,7 +24,7 @@ cd Blackjack-Python-ChatGPT/android
 L'APK viene creato in:
 
 ```text
-android/build/outputs/blackjack-royal.apk
+android/build/outputs/velvet-run-64.apk
 ```
 
 Requisiti:
@@ -63,7 +63,7 @@ cd android
 Output:
 
 ```text
-android/build/outputs/blackjack-royal.apk
+android/build/outputs/velvet-run-64.apk
 ```
 
 Per firmare con un keystore personalizzato:
@@ -90,6 +90,6 @@ git commit -m "Update game"
 git push origin main
 ```
 
-Il workflow crea una release con tag automatico `apk-<short-sha>`, per esempio `apk-a1b2c3d`, e allega un file come `blackjack-royal-a1b2c3d.apk`.
+Il workflow crea una release con tag automatico `apk-<short-sha>`, per esempio `apk-a1b2c3d`, e allega un file come `velvet-run-64-a1b2c3d.apk`.
 
 Il workflow puo' anche essere avviato manualmente dalla scheda GitHub Actions. In quel caso crea o aggiorna la release relativa al commit selezionato.

@@ -64,10 +64,10 @@ jobs:
           mkdir -p release
           SHORT_SHA="${GITHUB_SHA::7}"
           RELEASE_TAG="apk-${SHORT_SHA}"
-          APK_NAME="blackjack-royal-${SHORT_SHA}.apk"
-          cp android/build/outputs/blackjack-royal.apk "release/${APK_NAME}"
+          APK_NAME="velvet-run-64-${SHORT_SHA}.apk"
+          cp android/build/outputs/velvet-run-64.apk "release/${APK_NAME}"
           printf 'tag=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          printf 'title=%s\n' "Blackjack Royal ${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          printf 'title=%s\n' "Velvet Run 64 ${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           printf 'apk=%s\n' "release/${APK_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release

@@ -33,7 +33,7 @@ fi
 
 PLATFORM_JAR="${ANDROID_PLATFORM_JAR:-$SDK/platforms/android-35/android.jar}"
 OUT="$APP_DIR/build"
-APK_OUT="$OUT/outputs/blackjack-royal.apk"
+APK_OUT="$OUT/outputs/velvet-run-64.apk"
 
 if [[ ! -f "$PLATFORM_JAR" ]]; then
   printf 'Android platform not found: %s\n' "$PLATFORM_JAR" >&2
@@ -81,7 +81,7 @@ if [[ ! -f "$KEYSTORE" && -z "${BLACKJACK_KEYSTORE:-}" ]]; then
     -keyalg RSA \
     -keysize 2048 \
     -validity 10000 \
-    -dname "CN=Blackjack Royal,O=Blackjack Royal,C=IT"
+    -dname "CN=Velvet Run 64,O=Velvet Run 64,C=IT"
 fi
 
 if [[ ! -f "$KEYSTORE" ]]; then

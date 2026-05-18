@@ -1,132 +1,54 @@
 package com.siggeix7.blackjack;
 
 import android.app.Activity;
-import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.media.AudioManager;
-import android.media.ToneGenerator;
+import android.content.pm.ActivityInfo;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.text.InputType;
-import android.text.TextUtils;
-import android.util.DisplayMetrics;
-import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.view.animation.AccelerateDecelerateInterpolator;
-import android.view.animation.DecelerateInterpolator;
-import android.view.animation.OvershootInterpolator;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
+import java.util.ArrayList;
 
 public final class MainActivity extends Activity {
-    private static final String PREFS = "blackjack_royal";
-    private static final int FELT_DARK = 0xFF050811;
-    private static final int PANEL = 0xEA0B101B;
-    private static final int GOLD = 0xFFFFC85A;
-    private static final int GOLD_DARK = 0xFFE1912F;
-    private static final int BLUE = 0xFF2563EB;
-    private static final int GREEN = 0xFF14B878;
-    private static final int RED = 0xFFE5485E;
-    private static final int TEXT = 0xFFF8FBFF;
-    private static final int MUTED = 0xFFB8C5D6;
-    private static final int CYAN = 0xFF32D5FF;
-    private static final int VIOLET = 0xFF9C5CFF;
-
-    private SharedPreferences prefs;
-    private BlackjackGame game;
-    private Handler handler;
-    private ToneGenerator tone;
-    private FrameLayout root;
-    private FrameLayout tableLayer;
-    private LinearLayout actionDock;
-    private TextView logTicker;
-    private String currentProfile = "Giocatore";
-    private boolean soundEnabled = true;
-    private boolean vibrationEnabled = true;
-    private boolean fastAnimations;
-
-    private final HashMap<String, Integer> lastCardCounts = new HashMap<String, Integer>();
-    private final HashMap<String, Boolean> lastHiddenRows = new HashMap<String, Boolean>();
-    private boolean firstRender = true;
-    private boolean animateNextRender = true;
-    private boolean animateCurrentRender;
-    private boolean tableBusy;
-    private boolean forceHideDealerHole = true;
-    private String cinematicMessage = "Scegli la puntata e siediti al tavolo.";
-    private int dealStep;
+    private PlatformView gameView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestLandscape();
-        Window window = getWindow();
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         enterFullscreen();
+        gameView = new PlatformView(this);
+        setContentView(gameView);
+    }
 
-        prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        handler = new Handler(Looper.getMainLooper());
-        tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 45);
-        loadAppSettings();
-        String savedName = prefs.getString("name", null);
-        currentProfile = prefs.getString("active_profile", savedName == null ? "Giocatore" : savedName);
-        game = new BlackjackGame(currentProfile);
-        if (savedName != null || prefs.contains(prefKey("balance"))) {
-            restoreFromPrefs();
-        }
-        buildLayout();
-        render();
-        if (savedName == null) {
-            showNameDialog();
+    @Override
+    protected void onResume() {
+        super.onResume();
+        enterFullscreen();
+        if (gameView != null) {
+            gameView.resume();
         }
     }
 
     @Override
     protected void onPause() {
+        if (gameView != null) {
+            gameView.pauseForSystem();
+        }
         super.onPause();
-        if (game != null && (game.phase == BlackjackGame.Phase.BETTING
-                || game.phase == BlackjackGame.Phase.ROUND_OVER
-                || game.phase == BlackjackGame.Phase.GAME_OVER)) {
-            persistProgress();
-        }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (handler != null) {
-            handler.removeCallbacksAndMessages(null);
-        }
-        if (tone != null) {
-            tone.release();
-            tone = null;
-        }
     }
 
     @Override
@@ -137,16 +59,15 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void enterFullscreen() {
-        applyFullscreen(getWindow());
-    }
-
     private void requestLandscape() {
         try {
-            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         } catch (RuntimeException ignored) {
-            // Some Android releases can reject orientation requests; the game still runs portrait-safe.
         }
+    }
+
+    private void enterFullscreen() {
+        applyFullscreen(getWindow());
     }
 
     @SuppressWarnings("deprecation")
@@ -163,1811 +84,940 @@ public final class MainActivity extends Activity {
                     controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
                 }
             } else {
-                applyLegacyFullscreen(window);
+                window.getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
             }
         } catch (RuntimeException ignored) {
-            applyLegacyFullscreen(window);
         }
     }
 
-    @SuppressWarnings("deprecation")
-    private void applyLegacyFullscreen(Window window) {
-        window.getDecorView().setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                | View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-    }
+    private static final class PlatformView extends View implements Runnable {
+        private static final String PREFS = "velvet_run_64";
+        private static final int MENU = 0;
+        private static final int PLAYING = 1;
+        private static final int PAUSED = 2;
+        private static final int LEVEL_CLEAR = 3;
+        private static final int GAME_OVER = 4;
+        private static final int COMPLETED = 5;
 
-    private void buildLayout() {
-        root = new FrameLayout(this);
-        root.setBackgroundColor(FELT_DARK);
-        root.addView(new RoomBackgroundView(this), new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT));
-
-        tableLayer = new FrameLayout(this);
-        tableLayer.setClipChildren(false);
-        tableLayer.setClipToPadding(false);
-        root.addView(tableLayer, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT));
-
-        actionDock = new LinearLayout(this);
-        actionDock.setOrientation(LinearLayout.VERTICAL);
-        actionDock.setGravity(Gravity.CENTER);
-        actionDock.setPadding(dp(12), dp(9), dp(12), dp(9));
-        actionDock.setBackground(gradientRect(PANEL, 0xF10E1726, 0x5532D5FF, dp(22), dp(1)));
-        actionDock.setElevation(dp(16));
-        root.addView(actionDock, dockParams());
-
-        logTicker = new TextView(this);
-        logTicker.setTextColor(MUTED);
-        logTicker.setTextSize(compact() ? 10 : 12);
-        logTicker.setSingleLine(true);
-        logTicker.setEllipsize(TextUtils.TruncateAt.START);
-        logTicker.setGravity(Gravity.CENTER);
-        logTicker.setPadding(dp(12), dp(5), dp(12), dp(5));
-        logTicker.setBackground(roundRect(0x7B050A12, 0x334DB6FF, dp(14), dp(1)));
-
-        setContentView(root);
-    }
-
-    private FrameLayout.LayoutParams dockParams() {
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dockWidth(), ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        params.setMargins(0, 0, 0, dp(compact() ? 8 : 14));
-        return params;
-    }
-
-    private void render() {
-        animateCurrentRender = firstRender || animateNextRender;
-        renderTable();
-        renderActions();
-        if (animateCurrentRender) {
-            animateDock();
-        }
-        animateCurrentRender = false;
-        animateNextRender = false;
-        firstRender = false;
-    }
-
-    private void renderTable() {
-        tableLayer.removeAllViews();
-        tableLayer.addView(new CasinoTableView(this), new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT));
-
-        addTitle();
-        addTopHud();
-        addMiniMenu();
-        addDealerSeat();
-        addCpuSeats();
-        addHumanSeat();
-        addMessageBubble();
-    }
-
-    private void addTitle() {
-        LinearLayout brand = new LinearLayout(this);
-        brand.setOrientation(LinearLayout.VERTICAL);
-        brand.setPadding(dp(14), dp(9), dp(14), dp(10));
-        brand.setBackground(gradientRect(0xD80A1220, 0xA80F2334, 0x6632D5FF, dp(18), dp(1)));
-        brand.setElevation(dp(10));
-
-        TextView overline = new TextView(this);
-        overline.setText("LIVE TABLE");
-        overline.setTextColor(CYAN);
-        overline.setTextSize(compact() ? 8 : 10);
-        overline.setTypeface(Typeface.DEFAULT_BOLD);
-        overline.setLetterSpacing(0.22f);
-        overline.setGravity(Gravity.LEFT);
-        brand.addView(overline, fullWidth(0, 0, 0, 0));
-
-        TextView title = new TextView(this);
-        title.setText("BLACKJACK");
-        title.setTextColor(TEXT);
-        title.setTextSize(compact() ? 22 : 34);
-        title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
-        title.setLetterSpacing(0.08f);
-        title.setShadowLayer(dp(8), 0, dp(3), 0xCC000000);
-        title.setGravity(Gravity.LEFT);
-        brand.addView(title, fullWidth(0, 0, 0, 0));
-
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Royal neon room");
-        subtitle.setTextColor(MUTED);
-        subtitle.setTextSize(compact() ? 9 : 11);
-        subtitle.setGravity(Gravity.LEFT);
-        brand.addView(subtitle, fullWidth(0, 0, 0, 0));
-
-        tableLayer.addView(brand, anchoredParams(dp(compact() ? 190 : 292), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP | Gravity.LEFT, dp(compact() ? 8 : 18), dp(compact() ? 8 : 16), 0, 0));
-    }
-
-    private void addTopHud() {
-        LinearLayout hud = new LinearLayout(this);
-        hud.setOrientation(LinearLayout.HORIZONTAL);
-        hud.setGravity(Gravity.CENTER);
-        hud.setPadding(dp(5), dp(5), dp(5), dp(5));
-        hud.setBackground(roundRect(0x8A050A12, 0x3332D5FF, dp(20), dp(1)));
-        hud.setElevation(dp(8));
-        hud.addView(statusChip("Saldo", BlackjackGame.money(game.human.balance)), weighted(1f, dp(3), 0, dp(3), 0));
-        hud.addView(statusChip("Puntata", BlackjackGame.money(game.currentBet)), weighted(1f, dp(3), 0, dp(3), 0));
-        hud.addView(statusChip("Tavolo", game.tableName()), weighted(1f, dp(3), 0, dp(3), 0));
-        hud.addView(statusChip("Banco", BlackjackGame.money(game.dealerBankroll)), weighted(1f, dp(3), 0, dp(3), 0));
-        tableLayer.addView(hud, anchoredParams(dp(compact() ? 410 : 620), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP | Gravity.RIGHT, 0, dp(compact() ? 8 : 16), dp(compact() ? 8 : 18), 0));
-    }
-
-    private TextView statusChip(String label, String value) {
-        TextView chip = new TextView(this);
-        chip.setText(label + "\n" + value);
-        chip.setTextColor(TEXT);
-        chip.setTextSize(compact() ? 10 : 12);
-        chip.setTypeface(Typeface.DEFAULT_BOLD);
-        chip.setGravity(Gravity.CENTER);
-        chip.setPadding(dp(9), dp(7), dp(9), dp(7));
-        chip.setBackground(gradientRect(0xE60E1726, 0xD80C2530, 0x5532D5FF, dp(15), dp(1)));
-        return chip;
-    }
-
-    private void addMiniMenu() {
-        LinearLayout menu = new LinearLayout(this);
-        menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setGravity(Gravity.CENTER);
-        menu.setPadding(dp(6), dp(6), dp(6), dp(2));
-        menu.setBackground(roundRect(0x91050A12, 0x334DB6FF, dp(18), dp(1)));
-        menu.setElevation(dp(9));
-        menu.addView(tinyButton("Stats", 0xDF123143, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showStatsDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Hall", 0xDF1B2545, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showHallDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Regole", 0xDF123143, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showRulesDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Tavoli", 0xDF1B2545, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showTablesDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Trofei", 0xDF233A5E, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showAchievementsDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Missioni", 0xDF233A5E, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showMissionsDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Guida", 0xDF123143, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showGuideDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Profili", 0xDF123143, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showProfilesDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Audio", 0xDF1B2545, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showOptionsDialog(); }
-        }), miniButtonParams());
-        menu.addView(tinyButton("Reset", 0xDF642235, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); confirmNewGame(); }
-        }), miniButtonParams());
-        tableLayer.addView(menu, anchoredParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.LEFT | Gravity.CENTER_VERTICAL, dp(compact() ? 8 : 18), 0, 0, dp(compact() ? 20 : 34)));
-    }
-
-    private void addDealerSeat() {
-        boolean reveal = game.shouldRevealDealer() && !forceHideDealerHole;
-        String state;
-        if (game.dealerHand.isEmpty()) {
-            state = "in attesa";
-        } else if (reveal) {
-            state = "totale " + Player.score(game.dealerHand);
-        } else {
-            state = "carta coperta";
-        }
-        LinearLayout seat = seatPanel(game.phase == BlackjackGame.Phase.DEALER_TURN, true);
-        seat.addView(seatTitle("BANCO // " + state));
-        addCardStrip(seat, game.dealerHand, !reveal && game.dealerHand.size() > 1, true, "dealer");
-        tableLayer.addView(seat, anchoredParams(dealerWidth(), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, dp(compact() ? 64 : 94), 0, 0));
-    }
-
-    private void addCpuSeats() {
-        int position = 0;
-        for (int i = 0; i < game.tablePlayers.size(); i++) {
-            Player player = game.tablePlayers.get(i);
-            if (!player.cpu) {
-                continue;
-            }
-            boolean active = game.phase == BlackjackGame.Phase.CPU_TURN && i == game.activeCpuPlayerIndex;
-            LinearLayout seat = playerSeat(player, false, active, "cpu-" + player.name + "-");
-            tableLayer.addView(seat, cpuParams(position));
-            if (active) {
-                animateActive(seat);
-            }
-            position++;
-        }
-    }
-
-    private void addHumanSeat() {
-        LinearLayout seat = playerSeat(game.human, true, game.phase == BlackjackGame.Phase.PLAYER_TURN, "human-");
-        tableLayer.addView(seat, anchoredParams(humanWidth(), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, 0, 0, dockClearance()));
-        if (game.phase == BlackjackGame.Phase.PLAYER_TURN) {
-            animateActive(seat);
-        }
-    }
-
-    private void addMessageBubble() {
-        TextView msg = new TextView(this);
-        msg.setText(currentMessage());
-        msg.setTextColor(TEXT);
-        msg.setTextSize(compact() ? 12 : 15);
-        msg.setTypeface(Typeface.DEFAULT_BOLD);
-        msg.setGravity(Gravity.CENTER);
-        msg.setSingleLine(true);
-        msg.setEllipsize(TextUtils.TruncateAt.END);
-        msg.setPadding(dp(16), dp(9), dp(16), dp(9));
-        msg.setBackground(gradientRect(0xD90B1020, 0xC10D2630, 0x6658E3FF, dp(20), dp(1)));
-        msg.setElevation(dp(12));
-        tableLayer.addView(msg, anchoredParams(messageWidth(), ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.CENTER, 0, 0, 0, dp(compact() ? 8 : 18)));
-        if (animateCurrentRender) {
-            animatePanelEntry(msg, 0);
-        }
-    }
-
-    private String currentMessage() {
-        if (tableBusy) {
-            return cinematicMessage;
-        }
-        if (game.phase == BlackjackGame.Phase.PLAYER_TURN) {
-            return "Tocca a te: guarda il banco e scegli la mossa.";
-        }
-        if (game.phase == BlackjackGame.Phase.INSURANCE) {
-            return "Il banco mostra Asso: puoi prendere assicurazione.";
-        }
-        if (game.phase == BlackjackGame.Phase.ROUND_OVER) {
-            return "Mano conclusa. Pronto per una nuova distribuzione.";
-        }
-        if (game.phase == BlackjackGame.Phase.GAME_OVER) {
-            return "Partita terminata. Risultato registrato nella Hall.";
-        }
-        return cinematicMessage;
-    }
-
-    private LinearLayout playerSeat(Player player, boolean human, boolean active, String keyPrefix) {
-        LinearLayout seat = seatPanel(active, false);
-        String role = human ? "TU" : shortDifficulty(player.difficulty).toUpperCase(Locale.ITALY);
-        seat.addView(seatTitle(role + " // " + player.name + " // " + BlackjackGame.money(player.balance)));
-
-        HorizontalScrollView handsScroll = new HorizontalScrollView(this);
-        handsScroll.setHorizontalScrollBarEnabled(false);
-        handsScroll.setFillViewport(true);
-        handsScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        LinearLayout hands = new LinearLayout(this);
-        hands.setOrientation(LinearLayout.HORIZONTAL);
-        hands.setGravity(Gravity.CENTER);
-        hands.setMinimumWidth(human ? humanWidth() : cpuWidth());
-
-        for (int h = 0; h < player.hands.size(); h++) {
-            LinearLayout handBox = new LinearLayout(this);
-            handBox.setOrientation(LinearLayout.VERTICAL);
-            handBox.setGravity(Gravity.CENTER);
-            handBox.setPadding(dp(5), dp(2), dp(5), dp(4));
-            handBox.setBackground(roundRect(0x36101826, 0x554DB6FF, dp(12), dp(1)));
-            handBox.addView(handLabel(player, human, h));
-            addCardStrip(handBox, player.hands.get(h), false, !human, keyPrefix + h);
-            LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(handWidth(human), ViewGroup.LayoutParams.WRAP_CONTENT);
-            hp.setMargins(0, 0, dp(6), 0);
-            hands.addView(handBox, hp);
-        }
-
-        handsScroll.addView(hands, new HorizontalScrollView.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT));
-        seat.addView(handsScroll, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT));
-        return seat;
-    }
-
-    private String shortDifficulty(String difficulty) {
-        if (difficulty == null || difficulty.length() == 0) {
-            return "CPU";
-        }
-        return difficulty.length() <= 3 ? difficulty : difficulty.substring(0, 3);
-    }
-
-    private TextView handLabel(Player player, boolean human, int handIndex) {
-        int total = Player.score(player.hands.get(handIndex));
-        String state;
-        if (player.hands.get(handIndex).isEmpty()) {
-            state = "attesa";
-        } else if (player.surrendered.get(handIndex).booleanValue()) {
-            state = "resa";
-        } else if (Player.isBlackjack(player.hands.get(handIndex))) {
-            state = "BJ";
-        } else if (total > 21) {
-            state = "sballa";
-        } else {
-            state = String.valueOf(total);
-        }
-        String turn = human && game.phase == BlackjackGame.Phase.PLAYER_TURN && handIndex == game.activeHandIndex ? " *" : "";
-        TextView label = new TextView(this);
-        label.setText("MANO " + (handIndex + 1) + turn + "  |  " + state + "  |  " + BlackjackGame.money(player.bets.get(handIndex).intValue()));
-        label.setTextColor(MUTED);
-        label.setTextSize(compact() ? 9 : 11);
-        label.setGravity(Gravity.CENTER);
-        label.setSingleLine(true);
-        label.setEllipsize(TextUtils.TruncateAt.END);
-        return label;
-    }
-
-    private LinearLayout seatPanel(boolean active, boolean dealer) {
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setGravity(Gravity.CENTER);
-        panel.setPadding(dp(compact() ? 6 : 8), dp(compact() ? 5 : 7), dp(compact() ? 6 : 8), dp(compact() ? 5 : 7));
-        int fillStart = dealer ? 0xB20A1220 : active ? 0xE30D3443 : 0x75101826;
-        int fillEnd = dealer ? 0x95102034 : active ? 0xD41B2850 : 0x64100F1D;
-        int stroke = active ? CYAN : dealer ? 0x88FFC85A : 0x554DB6FF;
-        panel.setBackground(gradientRect(fillStart, fillEnd, stroke, dp(18), dp(active ? 2 : 1)));
-        panel.setElevation(active ? dp(15) : dp(7));
-        return panel;
-    }
-
-    private TextView seatTitle(String text) {
-        TextView title = new TextView(this);
-        title.setText(text);
-        title.setTextColor(TEXT);
-        title.setTextSize(compact() ? 10 : 13);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.CENTER);
-        title.setSingleLine(true);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        title.setLetterSpacing(0.05f);
-        title.setPadding(dp(2), 0, dp(2), dp(5));
-        return title;
-    }
-
-    private void renderActions() {
-        actionDock.removeAllViews();
-        TextView phase = new TextView(this);
-        phase.setText(phaseText());
-        phase.setTextColor(TEXT);
-        phase.setTextSize(compact() ? 10 : 12);
-        phase.setTypeface(Typeface.DEFAULT_BOLD);
-        phase.setGravity(Gravity.CENTER);
-        phase.setLetterSpacing(0.08f);
-        phase.setPadding(dp(8), dp(4), dp(8), dp(4));
-        phase.setBackground(roundRect(0x65050A12, 0x244DB6FF, dp(13), dp(1)));
-        actionDock.addView(phase, fullWidth(0, 0, 0, dp(3)));
-
-        if (tableBusy || game.phase == BlackjackGame.Phase.DEALING
-                || game.phase == BlackjackGame.Phase.CPU_TURN
-                || game.phase == BlackjackGame.Phase.DEALER_TURN) {
-            TextView busy = dockText(tableBusy ? cinematicMessage : "Il tavolo sta risolvendo la mano...");
-            actionDock.addView(busy, fullWidth(0, 0, 0, dp(3)));
-            appendTicker();
-            return;
-        }
-
-        if (game.phase == BlackjackGame.Phase.BETTING || game.phase == BlackjackGame.Phase.ROUND_OVER) {
-            renderBettingActions();
-        } else if (game.phase == BlackjackGame.Phase.INSURANCE) {
-            renderInsuranceActions();
-        } else if (game.phase == BlackjackGame.Phase.PLAYER_TURN) {
-            renderPlayerActions();
-        } else if (game.phase == BlackjackGame.Phase.GAME_OVER) {
-            renderGameOverActions();
-        }
-        appendTicker();
-    }
-
-    private void renderBettingActions() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-        row.addView(dockText("Main " + BlackjackGame.money(game.currentBet)), weighted(1.15f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("+10", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.changeBet(10); feedback(v); render(); }
-        }), weighted(0.72f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("+25", 0xFF233A5E, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.changeBet(25); feedback(v); render(); }
-        }), weighted(0.72f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("+100", 0xFF2D235E, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.changeBet(100); feedback(v); render(); }
-        }), weighted(0.82f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("Ripeti", 0xFF1F3B4B, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.repeatLastBet(); feedback(v); render(); }
-        }), weighted(0.9f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("Cancella", 0xFF43263A, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.clearBet(); game.clearSideBets(); feedback(v); render(); }
-        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("All-in", 0xFF233A5E, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.setMaxBet(); feedback(v); render(); }
-        }), weighted(0.85f, dp(2), 0, dp(2), dp(4)));
-        Button deal = actionButton(game.phase == BlackjackGame.Phase.ROUND_OVER ? "Nuova mano" : "Deal", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                feedback(v);
-                if (game.prepareRound()) {
-                    startInitialDealSequence();
-                } else {
-                    afterGameAction();
-                }
-            }
-        });
-        deal.setEnabled(game.canDeal());
-        row.addView(deal, weighted(1.25f, dp(2), 0, dp(2), dp(4)));
-        actionDock.addView(row, fullWidth(0, 0, 0, 0));
-
-        LinearLayout side = new LinearLayout(this);
-        side.setOrientation(LinearLayout.HORIZONTAL);
-        side.setGravity(Gravity.CENTER);
-        side.addView(dockText("Pairs " + BlackjackGame.money(game.sideBetPairs)), weighted(1f, dp(2), 0, dp(2), 0));
-        side.addView(actionButton("+5", 0xFF284453, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.changeSideBet(true, 5); feedback(v); render(); }
-        }), weighted(0.55f, dp(2), 0, dp(2), 0));
-        side.addView(dockText("21+3 " + BlackjackGame.money(game.sideBetTwentyOneThree)), weighted(1f, dp(2), 0, dp(2), 0));
-        side.addView(actionButton("+5", 0xFF284453, new View.OnClickListener() {
-            @Override public void onClick(View v) { game.changeSideBet(false, 5); feedback(v); render(); }
-        }), weighted(0.55f, dp(2), 0, dp(2), 0));
-        if (game.phase == BlackjackGame.Phase.ROUND_OVER) {
-            side.addView(actionButton("Riepilogo", 0xFF1F3B4B, new View.OnClickListener() {
-                @Override public void onClick(View v) { feedback(v); showRoundSummaryDialog(); }
-            }), weighted(1f, dp(2), 0, dp(2), 0));
-        }
-        actionDock.addView(side, fullWidth(0, 0, 0, 0));
-    }
-
-    private void renderInsuranceActions() {
-        int maxInsurance = Math.min(game.human.bets.get(0).intValue() / 2, game.human.balance);
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-        row.addView(dockText("Assicurazione max " + BlackjackGame.money(maxInsurance)), weighted(1.6f, dp(2), 0, dp(2), 0));
-        Button yes = actionButton("Assicurati", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.answerInsurance(true); afterGameAction(); }
-        });
-        yes.setEnabled(maxInsurance > 0);
-        row.addView(yes, weighted(1f, dp(2), 0, dp(2), 0));
-        row.addView(actionButton("No", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.answerInsurance(false); afterGameAction(); }
-        }), weighted(0.75f, dp(2), 0, dp(2), 0));
-        actionDock.addView(row, fullWidth(0, 0, 0, 0));
-    }
-
-    private void renderPlayerActions() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER);
-        Button hit = actionButton("Pesca", GREEN, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.hit(); afterGameAction(); }
-        });
-        hit.setEnabled(game.canHit());
-        row.addView(hit, weighted(1f, dp(2), 0, dp(2), dp(4)));
-        Button stand = actionButton("Stai", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.stand(); afterGameAction(); }
-        });
-        stand.setEnabled(game.canStand());
-        row.addView(stand, weighted(1f, dp(2), 0, dp(2), dp(4)));
-        Button dbl = actionButton("Raddoppia", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.doubleDown(); afterGameAction(); }
-        });
-        dbl.setEnabled(game.canDouble());
-        row.addView(dbl, weighted(1.25f, dp(2), 0, dp(2), dp(4)));
-        Button split = actionButton("Dividi", BLUE, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.split(); afterGameAction(); }
-        });
-        split.setEnabled(game.canSplit());
-        row.addView(split, weighted(1f, dp(2), 0, dp(2), dp(4)));
-        Button surrender = actionButton("Arrenditi", RED, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.surrender(); afterGameAction(); }
-        });
-        surrender.setEnabled(game.canSurrender());
-        row.addView(surrender, weighted(1.25f, dp(2), 0, dp(2), dp(4)));
-        row.addView(actionButton("Consiglio", 0xFF284453, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); showInfoDialog("Suggerimento", game.strategyHint()); }
-        }), weighted(1.25f, dp(2), 0, dp(2), dp(4)));
-        actionDock.addView(row, fullWidth(0, 0, 0, 0));
-    }
-
-    private void renderGameOverActions() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.addView(dockText("Partita terminata. Risultato salvato."), weighted(1.6f, dp(2), 0, dp(2), 0));
-        row.addView(actionButton("Nuova partita", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); startFreshGame(); }
-        }), weighted(1f, dp(2), 0, dp(2), 0));
-        actionDock.addView(row, fullWidth(0, 0, 0, 0));
-    }
-
-    private TextView dockText(String text) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextColor(MUTED);
-        view.setTextSize(compact() ? 10 : 12);
-        view.setTypeface(Typeface.DEFAULT_BOLD);
-        view.setGravity(Gravity.CENTER);
-        view.setPadding(dp(10), dp(6), dp(10), dp(6));
-        view.setSingleLine(true);
-        view.setEllipsize(TextUtils.TruncateAt.END);
-        view.setBackground(roundRect(0x58050A12, 0x224DB6FF, dp(14), dp(1)));
-        return view;
-    }
-
-    private void appendTicker() {
-        detachFromParent(logTicker);
-        logTicker.setText(game.eventText().replace('\n', ' '));
-        actionDock.addView(logTicker, fullWidth(0, dp(2), 0, 0));
-    }
-
-    private Button actionButton(String text, int color, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setTextColor(TEXT);
-        button.setTextSize(compact() ? 10 : 12);
-        button.setAllCaps(false);
-        button.setMinHeight(dp(compact() ? 34 : 40));
-        button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(6), 0, dp(6), 0);
-        button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setBackground(gradientRect(color, shade(color, 0.64f), 0x44FFFFFF, dp(15), dp(1)));
-        button.setElevation(dp(4));
-        button.setOnClickListener(listener);
-        return button;
-    }
-
-    private Button tinyButton(String text, int color, View.OnClickListener listener) {
-        Button button = actionButton(text, color, listener);
-        button.setTextSize(compact() ? 9 : 10);
-        button.setMinHeight(dp(compact() ? 28 : 32));
-        return button;
-    }
-
-    private void addCardStrip(LinearLayout parent, List<Card> cards, boolean hideLast, boolean compactCards, String rowKey) {
-        if (cards == null || cards.isEmpty()) {
-            lastCardCounts.put(rowKey, Integer.valueOf(0));
-            lastHiddenRows.put(rowKey, Boolean.valueOf(hideLast));
-            TextView empty = new TextView(this);
-            empty.setText("Slot carte vuoto");
-            empty.setTextColor(MUTED);
-            empty.setTextSize(compact() ? 9 : 11);
-            empty.setGravity(Gravity.CENTER);
-            empty.setPadding(dp(6), dp(8), dp(6), dp(8));
-            empty.setBackground(roundRect(0x25050A12, 0x224DB6FF, dp(10), dp(1)));
-            parent.addView(empty, fullWidth(0, dp(3), 0, dp(2)));
-            return;
-        }
-
-        Integer previousCount = lastCardCounts.get(rowKey);
-        Boolean previousHidden = lastHiddenRows.get(rowKey);
-        boolean hiddenWasRevealed = previousHidden != null && previousHidden.booleanValue() && !hideLast;
-
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setFillViewport(true);
-        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-
-        int cw = cardWidthForCount(compactCards, rowKey, cards.size());
-        int stripWidth = cardStripWidth(rowKey, compactCards);
-        int rightMargin = cardRightMarginForCount(cards.size(), cw, stripWidth);
-        row.setMinimumWidth(stripWidth);
-        for (int i = 0; i < cards.size(); i++) {
-            boolean hidden = hideLast && i == cards.size() - 1;
-            PlayingCardView cardView = new PlayingCardView(this, cards.get(i), hidden);
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(cw, (int) (cw * 1.43f));
-            cp.setMargins(dp(2), dp(2), i == cards.size() - 1 ? dp(2) : rightMargin, dp(2));
-            row.addView(cardView, cp);
-            boolean newCard = previousCount == null || i >= previousCount.intValue();
-            boolean flippedDealerCard = hiddenWasRevealed && i == cards.size() - 1;
-            if (flippedDealerCard) {
-                animateCardFlip(cardView, i);
-            } else if (animateCurrentRender && newCard) {
-                animateCardDeal(cardView, i, compactCards);
-            }
-        }
-        scroll.addView(row, new HorizontalScrollView.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT));
-        parent.addView(scroll, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (cards.size() > 3) {
-            scroll.post(new Runnable() {
-                @Override public void run() {
-                    scroll.fullScroll(View.FOCUS_RIGHT);
-                }
-            });
-        }
-        lastCardCounts.put(rowKey, Integer.valueOf(cards.size()));
-        lastHiddenRows.put(rowKey, Boolean.valueOf(hideLast));
-    }
-
-    private void startInitialDealSequence() {
-        handler.removeCallbacksAndMessages(null);
-        resetCardMemory();
-        dealStep = 0;
-        tableBusy = true;
-        forceHideDealerHole = true;
-        cinematicMessage = "Il mazziere taglia il mazzo e raccoglie le puntate...";
-        animateNextRender = true;
-        render();
-        handler.postDelayed(new Runnable() {
-            @Override public void run() { runInitialDealStep(); }
-        }, delay(650L));
-    }
-
-    private void runInitialDealStep() {
-        if (game.phase != BlackjackGame.Phase.DEALING) {
-            tableBusy = false;
-            render();
-            return;
-        }
-        int players = game.tablePlayers.size();
-        int firstDealerStep = players;
-        int secondPlayersStart = players + 1;
-        int secondDealerStep = players * 2 + 1;
-
-        if (dealStep < players) {
-            Player player = game.tablePlayers.get(dealStep);
-            Card card = game.dealCardToPlayer(dealStep, 0);
-            cinematicMessage = "Carta a " + displayName(player) + ": " + card.label();
-        } else if (dealStep == firstDealerStep) {
-            Card card = game.dealCardToDealer();
-            cinematicMessage = "Prima carta del banco: " + card.label();
-        } else if (dealStep >= secondPlayersStart && dealStep < secondDealerStep) {
-            int playerIndex = dealStep - secondPlayersStart;
-            Player player = game.tablePlayers.get(playerIndex);
-            Card card = game.dealCardToPlayer(playerIndex, 0);
-            cinematicMessage = "Seconda carta a " + displayName(player) + ": " + card.label();
-        } else if (dealStep == secondDealerStep) {
-            game.dealCardToDealer();
-            cinematicMessage = "Carta coperta al banco. Il tavolo si ferma un attimo.";
-        } else {
-            game.completeInitialDeal();
-            tableBusy = false;
-            afterGameAction();
-            return;
-        }
-
-        dealStep++;
-        animateNextRender = true;
-        render();
-        handler.postDelayed(new Runnable() {
-            @Override public void run() { runInitialDealStep(); }
-        }, delay(dealStep > secondDealerStep ? 900L : 520L));
-    }
-
-    private void startCpuSequence() {
-        tableBusy = true;
-        forceHideDealerHole = true;
-        cinematicMessage = "Gli altri giocatori studiano il banco...";
-        animateNextRender = true;
-        render();
-        handler.postDelayed(new Runnable() {
-            @Override public void run() { runCpuStep(); }
-        }, delay(850L));
-    }
-
-    private void runCpuStep() {
-        if (game.phase != BlackjackGame.Phase.CPU_TURN) {
-            tableBusy = false;
-            afterGameAction();
-            return;
-        }
-        BlackjackGame.TableAction action = game.playNextCpuStep();
-        animateNextRender = true;
-        if (action != null) {
-            cinematicMessage = action.message;
-            render();
-            handler.postDelayed(new Runnable() {
-                @Override public void run() { runCpuStep(); }
-            }, delay(Math.max(650, action.delayMs)));
-        } else {
-            startDealerSequence();
-        }
-    }
-
-    private void startDealerSequence() {
-        tableBusy = true;
-        forceHideDealerHole = game.dealerHand.size() > 1;
-        cinematicMessage = "Il mazziere posa la mano sulla carta coperta...";
-        animateNextRender = true;
-        render();
-        handler.postDelayed(new Runnable() {
-            @Override public void run() { revealDealerCard(); }
-        }, delay(1200L));
-    }
-
-    private void revealDealerCard() {
-        forceHideDealerHole = false;
-        if (game.dealerHand.size() > 1) {
-            cinematicMessage = "Il banco gira " + game.dealerHand.get(1).label()
-                + ". Totale banco: " + Player.score(game.dealerHand) + ".";
-        } else {
-            cinematicMessage = "Il banco scopre la propria mano.";
-        }
-        animateNextRender = true;
-        render();
-        handler.postDelayed(new Runnable() {
-            @Override public void run() { runDealerStep(); }
-        }, delay(game.dealerHasBlackjack() ? 1400L : 950L));
-    }
-
-    private void runDealerStep() {
-        forceHideDealerHole = false;
-        if (game.dealerHasBlackjack()) {
-            cinematicMessage = "Blackjack del banco. Il tavolo trattiene il fiato...";
-            game.settleCurrentRound(true);
-            finishAnimatedRound();
-            return;
-        }
-        if (!game.hasLiveHandsForDealer()) {
-            cinematicMessage = "Tutte le mani sono chiuse. Il banco non pesca.";
-            game.settleCurrentRound(false);
-            finishAnimatedRound();
-            return;
-        }
-        if (game.dealerShouldDraw()) {
-            Card card = game.dealerDrawStep();
-            cinematicMessage = "Il banco pesca: esce " + card.label()
-                + " (" + Player.score(game.dealerHand) + ").";
-            animateNextRender = true;
-            render();
-            handler.postDelayed(new Runnable() {
-                @Override public void run() { runDealerStep(); }
-            }, delay(1150L));
-        } else {
-            cinematicMessage = "Il banco resta con " + Player.score(game.dealerHand) + ". Si pagano le mani.";
-            game.settleCurrentRound(false);
-            finishAnimatedRound();
-        }
-    }
-
-    private void finishAnimatedRound() {
-        tableBusy = false;
-        forceHideDealerHole = false;
-        if (game.phase == BlackjackGame.Phase.GAME_OVER && !game.hallRecorded) {
-            appendHallEntry();
-            game.hallRecorded = true;
-        }
-        if (game.phase == BlackjackGame.Phase.ROUND_OVER || game.phase == BlackjackGame.Phase.GAME_OVER) {
-            persistProgress();
-        }
-        animateNextRender = true;
-        render();
-    }
-
-    private void afterGameAction() {
-        animateNextRender = true;
-        if (game.phase == BlackjackGame.Phase.GAME_OVER && !game.hallRecorded) {
-            appendHallEntry();
-            game.hallRecorded = true;
-        }
-        if (game.phase == BlackjackGame.Phase.CPU_TURN) {
-            startCpuSequence();
-            return;
-        }
-        if (game.phase == BlackjackGame.Phase.DEALER_TURN) {
-            startDealerSequence();
-            return;
-        }
-        if (game.phase == BlackjackGame.Phase.ROUND_OVER || game.phase == BlackjackGame.Phase.GAME_OVER) {
-            persistProgress();
-        }
-        tableBusy = false;
-        render();
-    }
-
-    private void restoreFromPrefs() {
-        Player.Stats stats = new Player.Stats();
-        stats.hands = prefInt("stats_hands", 0);
-        stats.wins = prefInt("stats_wins", 0);
-        stats.losses = prefInt("stats_losses", 0);
-        stats.pushes = prefInt("stats_pushes", 0);
-        stats.busts = prefInt("stats_busts", 0);
-        stats.blackjacks = prefInt("stats_blackjacks", 0);
-        stats.doubles = prefInt("stats_doubles", 0);
-        stats.splits = prefInt("stats_splits", 0);
-        stats.surrenders = prefInt("stats_surrenders", 0);
-        stats.insuranceWon = prefInt("stats_insurance", 0);
-        stats.sideBetsWon = prefInt("stats_side_bets", 0);
-        stats.net = prefInt("stats_net", 0);
-        int savedTableIndex = prefInt("table_index", 0);
-        game.rules.decks = prefInt("rules_decks", BlackjackGame.NUM_DECKS);
-        game.rules.blackjackPaysSixToFive = prefs.getBoolean(prefKey("rules_6_5"), prefs.getBoolean("rules_6_5", false));
-        game.rules.dealerHitsSoft17 = prefs.getBoolean(prefKey("rules_h17"), prefs.getBoolean("rules_h17", false));
-        game.rules.surrenderEnabled = prefs.getBoolean(prefKey("rules_surrender"), prefs.getBoolean("rules_surrender", true));
-        game.rules.doubleAfterSplit = prefs.getBoolean(prefKey("rules_das"), prefs.getBoolean("rules_das", true));
-        game.sideBetPairs = prefInt("side_pairs", 0);
-        game.sideBetTwentyOneThree = prefInt("side_213", 0);
-        game.winStreak = prefInt("win_streak", 0);
-        game.bestBalance = prefInt("best_balance", BlackjackGame.START_BALANCE);
-        game.importAchievements(prefs.getString(prefKey("achievements"), prefs.getString("achievements", "")));
-        game.restoreProgress(
-            prefInt("balance", BlackjackGame.START_BALANCE),
-            prefInt("dealer_bank", BlackjackGame.START_DEALER_BANK),
-            prefInt("current_bet", BlackjackGame.MIN_BET),
-            stats);
-        game.selectTable(savedTableIndex);
-    }
-
-    private void persistProgress() {
-        Player.Stats stats = game.human.stats;
-        prefs.edit()
-            .putString("name", game.human.name)
-            .putString("active_profile", currentProfile)
-            .putString("profiles", profilesWith(currentProfile))
-            .putString(prefKey("name"), game.human.name)
-            .putInt(prefKey("balance"), game.human.balance)
-            .putInt(prefKey("dealer_bank"), game.dealerBankroll)
-            .putInt(prefKey("current_bet"), game.currentBet)
-            .putInt(prefKey("side_pairs"), game.sideBetPairs)
-            .putInt(prefKey("side_213"), game.sideBetTwentyOneThree)
-            .putInt(prefKey("table_index"), game.tableIndex)
-            .putInt(prefKey("rules_decks"), game.rules.decks)
-            .putBoolean(prefKey("rules_6_5"), game.rules.blackjackPaysSixToFive)
-            .putBoolean(prefKey("rules_h17"), game.rules.dealerHitsSoft17)
-            .putBoolean(prefKey("rules_surrender"), game.rules.surrenderEnabled)
-            .putBoolean(prefKey("rules_das"), game.rules.doubleAfterSplit)
-            .putInt(prefKey("best_balance"), game.bestBalance)
-            .putInt(prefKey("win_streak"), game.winStreak)
-            .putString(prefKey("achievements"), game.exportAchievements())
-            .putInt(prefKey("stats_hands"), stats.hands)
-            .putInt(prefKey("stats_wins"), stats.wins)
-            .putInt(prefKey("stats_losses"), stats.losses)
-            .putInt(prefKey("stats_pushes"), stats.pushes)
-            .putInt(prefKey("stats_busts"), stats.busts)
-            .putInt(prefKey("stats_blackjacks"), stats.blackjacks)
-            .putInt(prefKey("stats_doubles"), stats.doubles)
-            .putInt(prefKey("stats_splits"), stats.splits)
-            .putInt(prefKey("stats_surrenders"), stats.surrenders)
-            .putInt(prefKey("stats_insurance"), stats.insuranceWon)
-            .putInt(prefKey("stats_side_bets"), stats.sideBetsWon)
-            .putInt(prefKey("stats_net"), stats.net)
-            .putInt("balance", game.human.balance)
-            .putInt("dealer_bank", game.dealerBankroll)
-            .putInt("current_bet", game.currentBet)
-            .putInt("stats_hands", stats.hands)
-            .putInt("stats_wins", stats.wins)
-            .putInt("stats_losses", stats.losses)
-            .putInt("stats_pushes", stats.pushes)
-            .putInt("stats_busts", stats.busts)
-            .putInt("stats_blackjacks", stats.blackjacks)
-            .putInt("stats_doubles", stats.doubles)
-            .putInt("stats_splits", stats.splits)
-            .putInt("stats_surrenders", stats.surrenders)
-            .putInt("stats_insurance", stats.insuranceWon)
-            .putInt("stats_side_bets", stats.sideBetsWon)
-            .putInt("stats_net", stats.net)
-            .apply();
-    }
-
-    private void loadAppSettings() {
-        soundEnabled = prefs.getBoolean("sound_enabled", true);
-        vibrationEnabled = prefs.getBoolean("vibration_enabled", true);
-        fastAnimations = prefs.getBoolean("fast_animations", false);
-    }
-
-    private void persistAppSettings() {
-        prefs.edit()
-            .putBoolean("sound_enabled", soundEnabled)
-            .putBoolean("vibration_enabled", vibrationEnabled)
-            .putBoolean("fast_animations", fastAnimations)
-            .apply();
-    }
-
-    private int prefInt(String key, int fallback) {
-        return prefs.getInt(prefKey(key), prefs.getInt(key, fallback));
-    }
-
-    private String prefKey(String key) {
-        return "profile_" + safeProfile(currentProfile) + "_" + key;
-    }
-
-    private String safeProfile(String name) {
-        String value = name == null ? "Giocatore" : name.trim();
-        if (value.length() == 0) {
-            value = "Giocatore";
-        }
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (Character.isLetterOrDigit(c)) {
-                builder.append(Character.toLowerCase(c));
-            } else {
-                builder.append('_');
-            }
-        }
-        return builder.toString();
-    }
-
-    private String cleanProfile(String name) {
-        if (name == null) {
-            return "Giocatore";
-        }
-        String trimmed = name.trim();
-        return trimmed.length() == 0 ? "Giocatore" : trimmed;
-    }
-
-    private String profilesWith(String profile) {
-        String list = prefs.getString("profiles", "");
-        if (profile == null || profile.trim().length() == 0) {
-            return list;
-        }
-        String[] items = list.split("\\|");
-        for (int i = 0; i < items.length; i++) {
-            if (profile.equals(items[i])) {
-                return list;
-            }
-        }
-        return list.length() == 0 ? profile : list + "|" + profile;
-    }
-
-    private void switchProfile(String profile) {
-        persistProgress();
-        currentProfile = cleanProfile(profile);
-        prefs.edit()
-            .putString("active_profile", currentProfile)
-            .putString("profiles", profilesWith(currentProfile))
-            .apply();
-        game = new BlackjackGame(currentProfile);
-        if (prefs.contains(prefKey("balance"))) {
-            restoreFromPrefs();
-        }
-        resetAnimationState();
-        cinematicMessage = "Profilo " + currentProfile + " caricato. Scegli la puntata.";
-        persistProgress();
-        render();
-    }
-
-    private void appendHallEntry() {
-        String old = prefs.getString("hall", "");
-        String date = new SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(new Date());
-        String reason = game.dealerBankroll <= 0 ? "Banco battuto" : "Credito esaurito";
-        String entry = date + " - " + game.human.name
-            + " - saldo " + BlackjackGame.money(game.human.balance)
-            + " - banco " + BlackjackGame.money(game.dealerBankroll)
-            + " - " + reason + "\n";
-        prefs.edit().putString("hall", entry + old).apply();
-    }
-
-    private void showNameDialog() {
-        final Dialog dialog = new Dialog(this);
-        LinearLayout box = dialogBox();
-        box.addView(dialogTitle("Benvenuto al Blackjack Royal"));
-        box.addView(dialogMessage("Inserisci il nome del giocatore per sederti al tavolo."), fullWidth(0, 0, 0, dp(10)));
-        final EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        input.setHint("Il tuo nome");
-        input.setTextColor(TEXT);
-        input.setHintTextColor(MUTED);
-        input.setTextSize(18);
-        input.setPadding(dp(12), dp(8), dp(12), dp(8));
-        input.setBackground(gradientRect(0xD90B1220, 0xC60E2530, 0x6632D5FF, dp(14), dp(1)));
-        box.addView(input, fullWidth(0, 0, 0, dp(12)));
-        box.addView(actionButton("Siediti al tavolo", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                feedback(v);
-                currentProfile = cleanProfile(input.getText().toString());
-                game.newSession(currentProfile);
-                resetAnimationState();
-                persistProgress();
-                dialog.dismiss();
-                render();
-            }
-        }), fullWidth(0, 0, 0, 0));
-        showCasinoDialog(dialog, box, false);
-    }
-
-    private void showStatsDialog() {
-        showInfoDialog("Statistiche", game.statsText());
-    }
-
-    private void showHallDialog() {
-        String hall = prefs.getString("hall", "");
-        if (hall.length() == 0) {
-            hall = "Nessuna partita conclusa ancora.";
-        }
-        showInfoDialog("Hall of Fame", hall);
-    }
-
-    private void showRoundSummaryDialog() {
-        showInfoDialog("Riepilogo mano", game.lastRoundSummary);
-    }
-
-    private void showAchievementsDialog() {
-        showInfoDialog("Trofei", game.achievementsText());
-    }
-
-    private void showMissionsDialog() {
-        showInfoDialog("Missioni", game.missionsText());
-    }
-
-    private void showGuideDialog() {
-        showInfoDialog("Guida rapida", game.guideText());
-    }
-
-    private void showRulesDialog() {
-        final Dialog dialog = new Dialog(this);
-        LinearLayout box = dialogBox();
-        box.addView(dialogTitle("Regole tavolo"));
-        box.addView(dialogMessage(game.rulesText()), fullWidth(0, 0, 0, dp(10)));
-
-        LinearLayout row1 = new LinearLayout(this);
-        row1.setOrientation(LinearLayout.HORIZONTAL);
-        row1.addView(actionButton("Mazzi -", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks - 1, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
-        row1.addView(actionButton("Mazzi +", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks + 1, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
-        box.addView(row1);
-
-        LinearLayout row2 = new LinearLayout(this);
-        row2.setOrientation(LinearLayout.HORIZONTAL);
-        row2.addView(actionButton(game.rules.blackjackPaysSixToFive ? "BJ 6:5" : "BJ 3:2", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, !game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
-        row2.addView(actionButton(game.rules.dealerHitsSoft17 ? "Soft17 pesca" : "Soft17 sta", 0xFF284453, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, game.rules.blackjackPaysSixToFive, !game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
-        box.addView(row2);
-
-        LinearLayout row3 = new LinearLayout(this);
-        row3.setOrientation(LinearLayout.HORIZONTAL);
-        row3.addView(actionButton(game.rules.surrenderEnabled ? "Surrender on" : "Surrender off", 0xFF1F3B4B, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, !game.rules.surrenderEnabled, game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
-        row3.addView(actionButton(game.rules.doubleAfterSplit ? "DAS on" : "DAS off", 0xFF1F3B4B, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); game.configureRules(game.rules.decks, game.rules.blackjackPaysSixToFive, game.rules.dealerHitsSoft17, game.rules.surrenderEnabled, !game.rules.doubleAfterSplit); persistProgress(); dialog.dismiss(); showRulesDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), dp(4)));
-        box.addView(row3);
-        box.addView(actionButton("Chiudi", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); dialog.dismiss(); render(); }
-        }), fullWidth(0, dp(8), 0, 0));
-        showCasinoDialog(dialog, box, true);
-    }
-
-    private void showTablesDialog() {
-        final Dialog dialog = new Dialog(this);
-        LinearLayout box = dialogBox();
-        box.addView(dialogTitle("Tavoli carriera"));
-        box.addView(dialogMessage(game.careerText()), fullWidth(0, 0, 0, dp(10)));
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        for (int i = 0; i < BlackjackGame.Rules.TABLE_NAMES.length; i++) {
-            final int index = i;
-            Button table = actionButton(BlackjackGame.Rules.TABLE_NAMES[i], i == game.tableIndex ? GOLD_DARK : 0xFF1B2636, new View.OnClickListener() {
-                @Override public void onClick(View v) { feedback(v); game.selectTable(index); persistProgress(); dialog.dismiss(); render(); }
-            });
-            row.addView(table, weighted(1f, dp(2), 0, dp(2), 0));
-        }
-        box.addView(row);
-        showCasinoDialog(dialog, box, true);
-    }
-
-    private void showOptionsDialog() {
-        final Dialog dialog = new Dialog(this);
-        LinearLayout box = dialogBox();
-        box.addView(dialogTitle("Opzioni"));
-        box.addView(dialogMessage("Audio: " + (soundEnabled ? "on" : "off")
-            + "\nVibrazione: " + (vibrationEnabled ? "on" : "off")
-            + "\nAnimazioni: " + (fastAnimations ? "rapide" : "cinematiche")), fullWidth(0, 0, 0, dp(10)));
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.addView(actionButton("Audio", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { soundEnabled = !soundEnabled; feedback(v); persistAppSettings(); dialog.dismiss(); showOptionsDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), 0));
-        row.addView(actionButton("Vibra", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { vibrationEnabled = !vibrationEnabled; feedback(v); persistAppSettings(); dialog.dismiss(); showOptionsDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), 0));
-        row.addView(actionButton("Velocita", 0xFF1B2636, new View.OnClickListener() {
-            @Override public void onClick(View v) { fastAnimations = !fastAnimations; feedback(v); persistAppSettings(); dialog.dismiss(); showOptionsDialog(); }
-        }), weighted(1f, dp(2), 0, dp(2), 0));
-        box.addView(row);
-        showCasinoDialog(dialog, box, true);
-    }
-
-    private void showProfilesDialog() {
-        final Dialog dialog = new Dialog(this);
-        LinearLayout box = dialogBox();
-        box.addView(dialogTitle("Profili"));
-        box.addView(dialogMessage("Profilo attivo: " + currentProfile), fullWidth(0, 0, 0, dp(8)));
-        String list = profilesWith(currentProfile);
-        String[] profiles = list.split("\\|");
-        for (int i = 0; i < profiles.length; i++) {
-            final String profile = profiles[i];
-            if (profile.trim().length() == 0) {
-                continue;
-            }
-            box.addView(actionButton(profile, profile.equals(currentProfile) ? GOLD_DARK : 0xFF1B2636, new View.OnClickListener() {
-                @Override public void onClick(View v) { feedback(v); switchProfile(profile); dialog.dismiss(); }
-            }), fullWidth(0, 0, 0, dp(5)));
-        }
-        final EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setHint("Nuovo profilo");
-        input.setTextColor(TEXT);
-        input.setHintTextColor(MUTED);
-        input.setBackground(gradientRect(0xD90B1220, 0xC60E2530, 0x6632D5FF, dp(14), dp(1)));
-        box.addView(input, fullWidth(0, dp(8), 0, dp(8)));
-        box.addView(actionButton("Crea / passa", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); switchProfile(cleanProfile(input.getText().toString())); dialog.dismiss(); }
-        }), fullWidth(0, 0, 0, 0));
-        showCasinoDialog(dialog, box, true);
-    }
-
-    private void confirmNewGame() {
-        final Dialog dialog = new Dialog(this);
-        LinearLayout box = dialogBox();
-        box.addView(dialogTitle("Nuova partita"));
-        box.addView(dialogMessage("Azzerare saldo e statistiche mantenendo lo stesso nome?"), fullWidth(0, 0, 0, dp(12)));
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.addView(actionButton("Annulla", 0xFF31473C, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); dialog.dismiss(); }
-        }), weighted(1f, dp(2), 0, dp(2), 0));
-        row.addView(actionButton("Reset", RED, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); dialog.dismiss(); startFreshGame(); }
-        }), weighted(1f, dp(2), 0, dp(2), 0));
-        box.addView(row);
-        showCasinoDialog(dialog, box, true);
-    }
-
-    private void showInfoDialog(String titleText, String bodyText) {
-        final Dialog dialog = new Dialog(this);
-        LinearLayout box = dialogBox();
-        box.addView(dialogTitle(titleText));
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(false);
-        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        TextView body = dialogMessage(bodyText);
-        body.setGravity(Gravity.LEFT);
-        scroll.addView(body, new ScrollView.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT));
-        int bodyHeight = Math.min(dp(compact() ? 170 : 280), Math.max(dp(120), screenHeight() - dp(150)));
-        box.addView(scroll, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            bodyHeight));
-        box.addView(actionButton("Chiudi", GOLD_DARK, new View.OnClickListener() {
-            @Override public void onClick(View v) { feedback(v); dialog.dismiss(); }
-        }), fullWidth(0, dp(12), 0, 0));
-        showCasinoDialog(dialog, box, true);
-    }
-
-    private LinearLayout dialogBox() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(22), dp(18), dp(22), dp(18));
-        box.setBackground(gradientRect(0xF4080D18, 0xF3122634, 0x7732D5FF, dp(24), dp(1)));
-        box.setElevation(dp(18));
-        return box;
-    }
-
-    private TextView dialogTitle(String text) {
-        TextView title = new TextView(this);
-        title.setText(text);
-        title.setTextColor(TEXT);
-        title.setTextSize(compact() ? 20 : 24);
-        title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
-        title.setLetterSpacing(0.06f);
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, 0, 0, dp(10));
-        return title;
-    }
-
-    private TextView dialogMessage(String text) {
-        TextView message = new TextView(this);
-        message.setText(text);
-        message.setTextColor(MUTED);
-        message.setTextSize(compact() ? 14 : 15);
-        message.setLineSpacing(dp(2), 1f);
-        message.setGravity(Gravity.CENTER);
-        return message;
-    }
-
-    private void showCasinoDialog(Dialog dialog, View view, boolean cancelable) {
-        dialog.setContentView(view);
-        dialog.setCancelable(cancelable);
-        dialog.show();
-        Window shown = dialog.getWindow();
-        if (shown != null) {
-            applyFullscreen(shown);
-            shown.setBackgroundDrawableResource(android.R.color.transparent);
-            int maxWidth = Math.max(dp(280), screenWidth() - dp(24));
-            shown.setLayout(Math.min(dp(compact() ? 360 : 470), maxWidth), ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
-    }
-
-    private void startFreshGame() {
-        handler.removeCallbacksAndMessages(null);
-        tableBusy = false;
-        forceHideDealerHole = true;
-        cinematicMessage = "Nuovo tavolo pronto. Scegli la puntata.";
-        game.newSession(game.human.name);
-        resetAnimationState();
-        persistProgress();
-        render();
-    }
-
-    private String displayName(Player player) {
-        return player.cpu ? player.name : "te";
-    }
-
-    private long delay(long ms) {
-        return fastAnimations ? Math.max(120L, (long) (ms * 0.55f)) : ms;
-    }
-
-    private String phaseText() {
-        if (game.phase == BlackjackGame.Phase.BETTING) return "Fase puntate";
-        if (game.phase == BlackjackGame.Phase.DEALING) return "Distribuzione";
-        if (game.phase == BlackjackGame.Phase.INSURANCE) return "Assicurazione";
-        if (game.phase == BlackjackGame.Phase.PLAYER_TURN) return "Il tuo turno";
-        if (game.phase == BlackjackGame.Phase.CPU_TURN) return "Avversari";
-        if (game.phase == BlackjackGame.Phase.ROUND_OVER) return "Mano conclusa";
-        if (game.phase == BlackjackGame.Phase.GAME_OVER) return "Game over";
-        return "Banco";
-    }
-
-    private void animateCardDeal(final View view, int index, boolean compactCards) {
-        view.setAlpha(0f);
-        view.setTranslationY(compactCards ? -dp(16) : -dp(28));
-        view.setTranslationX(dp(18));
-        view.setRotation(index % 2 == 0 ? -8f : 8f);
-        view.setScaleX(0.82f);
-        view.setScaleY(0.82f);
-        view.animate()
-            .alpha(1f)
-            .translationX(0f)
-            .translationY(0f)
-            .rotation(0f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .setStartDelay(70L * index)
-            .setDuration(360L)
-            .setInterpolator(new OvershootInterpolator(1.1f))
-            .start();
-    }
-
-    private void animateCardFlip(final View view, int index) {
-        view.setCameraDistance(dp(9000));
-        view.setRotationY(-90f);
-        view.setAlpha(0.45f);
-        view.animate()
-            .rotationY(0f)
-            .alpha(1f)
-            .setStartDelay(90L * index)
-            .setDuration(420L)
-            .setInterpolator(new DecelerateInterpolator())
-            .start();
-    }
-
-    private void animatePanelEntry(final View view, int index) {
-        view.setAlpha(0f);
-        view.setTranslationY(dp(14));
-        view.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setStartDelay(45L * index)
-            .setDuration(260L)
-            .setInterpolator(new DecelerateInterpolator())
-            .start();
-    }
-
-    private void animateActive(final View view) {
-        view.postDelayed(new Runnable() {
-            @Override public void run() {
-                view.animate().cancel();
-                view.setAlpha(1f);
-                view.setTranslationY(0f);
-                view.setScaleX(0.99f);
-                view.setScaleY(0.99f);
-                view.animate()
-                    .scaleX(1.025f)
-                    .scaleY(1.025f)
-                    .setDuration(260L)
-                    .setInterpolator(new AccelerateDecelerateInterpolator())
-                    .withEndAction(new Runnable() {
-                        @Override public void run() {
-                            view.animate()
-                                .scaleX(1f)
-                                .scaleY(1f)
-                                .setDuration(220L)
-                                .setInterpolator(new DecelerateInterpolator())
-                                .start();
-                        }
-                    })
-                    .start();
-            }
-        }, animateCurrentRender ? 360L : 0L);
-    }
-
-    private void animateDock() {
-        actionDock.setTranslationY(dp(18));
-        actionDock.setAlpha(0.82f);
-        actionDock.animate()
-            .translationY(0f)
-            .alpha(1f)
-            .setDuration(230L)
-            .setInterpolator(new DecelerateInterpolator())
-            .start();
-    }
-
-    private void feedback(View view) {
-        if (vibrationEnabled) {
-            view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-        }
-        if (soundEnabled && tone != null) {
-            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 45);
-        }
-        view.animate().cancel();
-        view.setScaleX(0.96f);
-        view.setScaleY(0.96f);
-        view.animate().scaleX(1f).scaleY(1f).setDuration(140L).setInterpolator(new DecelerateInterpolator()).start();
-    }
-
-    private void resetCardMemory() {
-        lastCardCounts.clear();
-        lastHiddenRows.clear();
-    }
-
-    private void resetAnimationState() {
-        resetCardMemory();
-        firstRender = true;
-        animateNextRender = true;
-        tableBusy = false;
-        forceHideDealerHole = true;
-    }
-
-    private void detachFromParent(View view) {
-        if (view != null && view.getParent() instanceof ViewGroup) {
-            ((ViewGroup) view.getParent()).removeView(view);
-        }
-    }
-
-    private boolean compact() {
-        DisplayMetrics metrics = getResources().getDisplayMetrics();
-        float minDp = Math.min(metrics.widthPixels / metrics.density, metrics.heightPixels / metrics.density);
-        return minDp < 600f;
-    }
-
-    private int dockWidth() {
-        return Math.min(dp(compact() ? 680 : 920), screenWidth() - dp(22));
-    }
-
-    private int dockClearance() {
-        return dp(compact() ? 118 : 148);
-    }
-
-    private int dealerWidth() {
-        return dp(compact() ? 196 : 270);
-    }
-
-    private int cpuWidth() {
-        return dp(compact() ? 150 : 204);
-    }
-
-    private int humanWidth() {
-        return Math.min(dp(compact() ? 470 : 710), screenWidth() - dp(50));
-    }
-
-    private int handWidth(boolean human) {
-        return dp(human ? (compact() ? 164 : 224) : (compact() ? 116 : 162));
-    }
-
-    private int messageWidth() {
-        return Math.min(dp(compact() ? 500 : 730), screenWidth() - dp(96));
-    }
-
-    private int cardWidth(boolean small) {
-        if (small) return dp(compact() ? 34 : 50);
-        return dp(compact() ? 46 : 68);
-    }
-
-    private int cardWidthForCount(boolean small, String rowKey, int count) {
-        int base = cardWidth(small);
-        int min = dp(small ? (compact() ? 22 : 32) : (compact() ? 32 : 46));
-        int available = cardStripWidth(rowKey, small);
-        if (count <= 0) {
-            return base;
-        }
-        int fitted = available / count - dp(4);
-        return Math.min(base, Math.max(min, fitted));
-    }
-
-    private int cardRightMarginForCount(int count, int cardWidth, int availableWidth) {
-        int side = dp(2);
-        int fullWidth = count * (cardWidth + side * 2);
-        if (count <= 1 || fullWidth <= availableWidth) {
-            return side;
-        }
-        int overlap = (int) Math.ceil((fullWidth - availableWidth) / (double) (count - 1));
-        return side - overlap;
-    }
-
-    private int cardStripWidth(String rowKey, boolean small) {
-        int padding = dp(compact() ? 16 : 22);
-        int width;
-        if ("dealer".equals(rowKey)) {
-            width = dealerWidth();
-        } else if (rowKey != null && rowKey.startsWith("human-")) {
-            width = handWidth(true);
-        } else {
-            width = handWidth(false);
-        }
-        return Math.max(cardWidth(small), width - padding);
-    }
-
-    private FrameLayout.LayoutParams cpuParams(int position) {
-        int width = cpuWidth();
-        if (position == 0) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, dp(compact() ? 82 : 112), dp(compact() ? 132 : 178), 0, 0);
-        if (position == 1) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT, 0, dp(compact() ? 132 : 178), dp(compact() ? 18 : 28), 0);
-        if (position == 2) return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, dp(compact() ? 46 : 74), 0, 0, dp(compact() ? 126 : 170));
-        return anchoredParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.RIGHT, 0, 0, dp(compact() ? 46 : 74), dp(compact() ? 126 : 170));
-    }
-
-    private FrameLayout.LayoutParams absParams(int width, int height, int left, int top) {
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, height);
-        params.leftMargin = left;
-        params.topMargin = top;
-        return params;
-    }
-
-    private FrameLayout.LayoutParams anchoredParams(int width, int height, int gravity, int left, int top, int right, int bottom) {
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(width, height);
-        params.gravity = gravity;
-        params.setMargins(left, top, right, bottom);
-        return params;
-    }
-
-    private LinearLayout.LayoutParams weighted(float weight, int left, int top, int right, int bottom) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
-        params.setMargins(left, top, right, bottom);
-        return params;
-    }
-
-    private LinearLayout.LayoutParams fullWidth(int left, int top, int right, int bottom) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(left, top, right, bottom);
-        return params;
-    }
-
-    private LinearLayout.LayoutParams miniButtonParams() {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(compact() ? 64 : 82), dp(compact() ? 23 : 28));
-        params.setMargins(0, 0, 0, dp(3));
-        return params;
-    }
-
-    private GradientDrawable gradientRect(int start, int end, int stroke, int radius, int strokeWidth) {
-        GradientDrawable drawable = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[] {start, end});
-        drawable.setCornerRadius(radius);
-        if (stroke != 0 && strokeWidth > 0) {
-            drawable.setStroke(strokeWidth, stroke);
-        }
-        return drawable;
-    }
-
-    private GradientDrawable roundRect(int fill, int stroke, int radius, int strokeWidth) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(fill);
-        drawable.setCornerRadius(radius);
-        if (stroke != 0 && strokeWidth > 0) {
-            drawable.setStroke(strokeWidth, stroke);
-        }
-        return drawable;
-    }
-
-    private int shade(int color, float factor) {
-        int alpha = (color >>> 24) & 0xFF;
-        int red = Math.min(255, Math.max(0, (int) (((color >>> 16) & 0xFF) * factor)));
-        int green = Math.min(255, Math.max(0, (int) (((color >>> 8) & 0xFF) * factor)));
-        int blue = Math.min(255, Math.max(0, (int) ((color & 0xFF) * factor)));
-        return (alpha << 24) | (red << 16) | (green << 8) | blue;
-    }
-
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
-    }
-
-    private int screenWidth() {
-        return getResources().getDisplayMetrics().widthPixels;
-    }
-
-    private int screenHeight() {
-        return getResources().getDisplayMetrics().heightPixels;
-    }
-
-    private static final class RoomBackgroundView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path path = new Path();
+        private final RectF rect = new RectF();
+        private final SharedPreferences prefs;
+        private final ArrayList<Level> levels = new ArrayList<Level>();
 
-        RoomBackgroundView(Context context) {
+        private int state = MENU;
+        private int levelIndex;
+        private int unlockedLevel;
+        private int coins;
+        private int gems;
+        private int lives = 3;
+        private int score;
+        private float bestTime;
+        private float runTime;
+        private float playerX;
+        private float playerY;
+        private float playerVx;
+        private float playerVy;
+        private float checkpointX;
+        private float checkpointY;
+        private boolean onGround;
+        private boolean jumpWasDown;
+        private boolean facingRight = true;
+        private boolean running;
+        private boolean leftPressed;
+        private boolean rightPressed;
+        private boolean jumpPressed;
+        private float cameraX;
+        private long lastFrameNanos;
+        private String toast = "";
+        private float toastTimer;
+
+        PlatformView(Context context) {
             super(context);
+            setFocusable(true);
+            setFocusableInTouchMode(true);
+            prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            buildLevels();
+            loadProgress();
+            resetLevel(levelIndex, false);
+        }
+
+        void resume() {
+            running = true;
+            lastFrameNanos = System.nanoTime();
+            removeCallbacks(this);
+            postOnAnimation(this);
+        }
+
+        void pauseForSystem() {
+            saveProgress();
+            running = false;
+            removeCallbacks(this);
+        }
+
+        @Override
+        public void run() {
+            if (!running) {
+                return;
+            }
+            long now = System.nanoTime();
+            float dt = Math.min(0.033f, (now - lastFrameNanos) / 1000000000f);
+            lastFrameNanos = now;
+            update(dt);
+            invalidate();
+            postOnAnimation(this);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+                handleTap(event.getX(event.getActionIndex()), event.getY(event.getActionIndex()));
+            }
+            updateControls(event);
+            return true;
+        }
+
+        private void handleTap(float x, float y) {
+            float w = getWidth();
+            float h = getHeight();
+            if (state == MENU) {
+                if (y > h * 0.42f && y < h * 0.58f) {
+                    state = PLAYING;
+                    showToast("Level " + (levelIndex + 1) + ": " + currentLevel().name);
+                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                } else if (y > h * 0.61f && y < h * 0.75f) {
+                    newGame();
+                    state = PLAYING;
+                }
+                return;
+            }
+            if (state == PAUSED) {
+                if (y < h * 0.55f) {
+                    state = PLAYING;
+                } else {
+                    state = MENU;
+                    saveProgress();
+                }
+                return;
+            }
+            if (state == LEVEL_CLEAR) {
+                nextLevel();
+                return;
+            }
+            if (state == GAME_OVER || state == COMPLETED) {
+                newGame();
+                state = PLAYING;
+                return;
+            }
+            if (state == PLAYING && x > w - dp(96) && y < dp(72)) {
+                state = PAUSED;
+                saveProgress();
+            }
+        }
+
+        private void updateControls(MotionEvent event) {
+            int action = event.getActionMasked();
+            boolean up = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL;
+            boolean pointerUp = action == MotionEvent.ACTION_POINTER_UP;
+            int lifted = pointerUp || up ? event.getActionIndex() : -1;
+            leftPressed = false;
+            rightPressed = false;
+            jumpPressed = false;
+            if (up && !pointerUp) {
+                return;
+            }
+            float w = getWidth();
+            float h = getHeight();
+            for (int i = 0; i < event.getPointerCount(); i++) {
+                if (i == lifted) {
+                    continue;
+                }
+                float x = event.getX(i);
+                float y = event.getY(i);
+                if (y < h * 0.60f) {
+                    continue;
+                }
+                if (x < w * 0.22f) {
+                    leftPressed = true;
+                } else if (x < w * 0.44f) {
+                    rightPressed = true;
+                } else if (x > w * 0.68f) {
+                    jumpPressed = true;
+                }
+            }
+        }
+
+        private void update(float dt) {
+            if (state != PLAYING) {
+                if (toastTimer > 0f) {
+                    toastTimer -= dt;
+                }
+                return;
+            }
+            Level level = currentLevel();
+            runTime += dt;
+            if (toastTimer > 0f) {
+                toastTimer -= dt;
+            }
+            updatePlayer(dt, level);
+            updateEnemies(dt, level);
+            updateCollectibles(level);
+            checkHazards(level);
+            checkGoal(level);
+            float target = playerX - getWidth() / scale() * 0.42f;
+            cameraX += (target - cameraX) * Math.min(1f, dt * 7f);
+            cameraX = clamp(cameraX, 0f, Math.max(0f, level.width - getWidth() / scale()));
+        }
+
+        private void updatePlayer(float dt, Level level) {
+            float accel = onGround ? 2300f : 1200f;
+            float maxSpeed = 340f;
+            if (leftPressed) {
+                playerVx -= accel * dt;
+                facingRight = false;
+            }
+            if (rightPressed) {
+                playerVx += accel * dt;
+                facingRight = true;
+            }
+            if (!leftPressed && !rightPressed) {
+                float drag = onGround ? 0.82f : 0.96f;
+                playerVx *= (float) Math.pow(drag, dt * 60f);
+            }
+            playerVx = clamp(playerVx, -maxSpeed, maxSpeed);
+            if (jumpPressed && !jumpWasDown && onGround) {
+                playerVy = -780f;
+                onGround = false;
+                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            }
+            jumpWasDown = jumpPressed;
+            playerVy += 2100f * dt;
+            playerVy = Math.min(playerVy, 1100f);
+
+            float oldX = playerX;
+            float oldY = playerY;
+            playerX += playerVx * dt;
+            resolveHorizontal(level);
+            playerY += playerVy * dt;
+            onGround = false;
+            resolveVertical(level, oldY);
+            playerX = clamp(playerX, 0f, level.width - playerWidth());
+            if (playerY > 920f) {
+                loseLife();
+            }
+            if (Math.abs(playerX - oldX) > 1f || Math.abs(playerY - oldY) > 1f) {
+                score = coins * 10 + gems * 50 + levelIndex * 500;
+            }
+        }
+
+        private void resolveHorizontal(Level level) {
+            RectF player = playerRect();
+            for (Platform p : level.platforms) {
+                if (RectF.intersects(player, p.rect)) {
+                    if (playerVx > 0f) {
+                        playerX = p.rect.left - playerWidth();
+                    } else if (playerVx < 0f) {
+                        playerX = p.rect.right;
+                    }
+                    playerVx = 0f;
+                    player = playerRect();
+                }
+            }
+        }
+
+        private void resolveVertical(Level level, float oldY) {
+            RectF player = playerRect();
+            float oldBottom = oldY + playerHeight();
+            for (Platform p : level.platforms) {
+                if (RectF.intersects(player, p.rect)) {
+                    if (playerVy > 0f && oldBottom <= p.rect.top + 16f) {
+                        playerY = p.rect.top - playerHeight();
+                        playerVy = 0f;
+                        onGround = true;
+                    } else if (playerVy < 0f) {
+                        playerY = p.rect.bottom;
+                        playerVy = 0f;
+                    }
+                    player = playerRect();
+                }
+            }
+        }
+
+        private void updateEnemies(float dt, Level level) {
+            RectF player = playerRect();
+            float oldVy = playerVy;
+            for (Enemy e : level.enemies) {
+                if (!e.alive) {
+                    continue;
+                }
+                e.x += e.dir * e.speed * dt;
+                if (e.x < e.minX) {
+                    e.x = e.minX;
+                    e.dir = 1f;
+                } else if (e.x > e.maxX) {
+                    e.x = e.maxX;
+                    e.dir = -1f;
+                }
+                RectF enemy = new RectF(e.x, e.y, e.x + e.w, e.y + e.h);
+                if (RectF.intersects(player, enemy)) {
+                    if (oldVy > 0f && player.bottom < enemy.centerY()) {
+                        e.alive = false;
+                        playerVy = -520f;
+                        coins += 3;
+                        showToast("Drone destroyed +3 coins");
+                    } else {
+                        loseLife();
+                        return;
+                    }
+                }
+            }
+        }
+
+        private void updateCollectibles(Level level) {
+            RectF player = playerRect();
+            for (Pickup c : level.pickups) {
+                if (c.taken) {
+                    continue;
+                }
+                RectF item = new RectF(c.x - 18f, c.y - 18f, c.x + 18f, c.y + 18f);
+                if (RectF.intersects(player, item)) {
+                    c.taken = true;
+                    if (c.gem) {
+                        gems++;
+                        showToast("Crystal +1");
+                    } else {
+                        coins++;
+                    }
+                }
+            }
+        }
+
+        private void checkHazards(Level level) {
+            RectF player = playerRect();
+            for (RectF h : level.hazards) {
+                if (RectF.intersects(player, h)) {
+                    loseLife();
+                    return;
+                }
+            }
+            if (playerX > level.checkpointX && checkpointX < level.checkpointX) {
+                checkpointX = level.checkpointX;
+                checkpointY = level.checkpointY;
+                showToast("Checkpoint");
+            }
+        }
+
+        private void checkGoal(Level level) {
+            RectF goal = new RectF(level.goalX - 20f, level.goalY - 100f, level.goalX + 70f, level.goalY + 20f);
+            if (RectF.intersects(playerRect(), goal)) {
+                if (levelIndex == levels.size() - 1) {
+                    state = COMPLETED;
+                    unlockedLevel = Math.max(unlockedLevel, levels.size() - 1);
+                } else {
+                    state = LEVEL_CLEAR;
+                    unlockedLevel = Math.max(unlockedLevel, levelIndex + 1);
+                }
+                if (bestTime <= 0f || runTime < bestTime) {
+                    bestTime = runTime;
+                }
+                saveProgress();
+            }
+        }
+
+        private void loseLife() {
+            lives--;
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            if (lives <= 0) {
+                state = GAME_OVER;
+                saveProgress();
+                return;
+            }
+            playerX = checkpointX;
+            playerY = checkpointY;
+            playerVx = 0f;
+            playerVy = 0f;
+            cameraX = Math.max(0f, playerX - 320f);
+            showToast("Try again. Lives " + lives);
+        }
+
+        private void nextLevel() {
+            if (levelIndex < levels.size() - 1) {
+                levelIndex++;
+                resetLevel(levelIndex, true);
+                state = PLAYING;
+                saveProgress();
+            } else {
+                state = COMPLETED;
+            }
+        }
+
+        private void newGame() {
+            levelIndex = 0;
+            unlockedLevel = Math.max(unlockedLevel, 0);
+            coins = 0;
+            gems = 0;
+            score = 0;
+            lives = 3;
+            resetLevel(0, true);
+            saveProgress();
+        }
+
+        private void resetLevel(int index, boolean fullReset) {
+            levelIndex = clampIndex(index);
+            Level level = currentLevel();
+            if (fullReset) {
+                lives = 3;
+            }
+            runTime = 0f;
+            level.reset();
+            playerX = level.startX;
+            playerY = level.startY;
+            playerVx = 0f;
+            playerVy = 0f;
+            checkpointX = level.startX;
+            checkpointY = level.startY;
+            cameraX = 0f;
+            onGround = false;
+            jumpWasDown = false;
+            showToast(level.name);
+        }
+
+        private void loadProgress() {
+            levelIndex = clampIndex(prefs.getInt("level", 0));
+            unlockedLevel = clampIndex(prefs.getInt("unlocked", 0));
+            coins = prefs.getInt("coins", 0);
+            gems = prefs.getInt("gems", 0);
+            bestTime = prefs.getFloat("best_time", 0f);
+        }
+
+        private void saveProgress() {
+            prefs.edit()
+                .putInt("level", levelIndex)
+                .putInt("unlocked", unlockedLevel)
+                .putInt("coins", coins)
+                .putInt("gems", gems)
+                .putFloat("best_time", bestTime)
+                .apply();
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
-            int w = getWidth();
-            int h = getHeight();
-            long now = System.currentTimeMillis();
-            float sweep = (now % 9000L) / 9000f;
+            super.onDraw(canvas);
+            float s = scale();
+            canvas.save();
+            canvas.scale(s, s);
+            drawWorld(canvas);
+            canvas.restore();
+            drawHud(canvas);
+            drawControls(canvas);
+            if (state != PLAYING) {
+                drawOverlay(canvas);
+            }
+            if (toastTimer > 0f && toast.length() > 0) {
+                drawToast(canvas);
+            }
+        }
 
+        private void drawWorld(Canvas canvas) {
+            float sw = getWidth() / scale();
+            float sh = getHeight() / scale();
+            Level level = currentLevel();
+            drawSky(canvas, sw, sh, level.theme);
+            canvas.translate(-cameraX, 0f);
+            drawBackdrop(canvas, level, sh);
+            for (Platform p : level.platforms) {
+                drawPlatform(canvas, p, level.theme);
+            }
+            for (RectF hazard : level.hazards) {
+                drawHazard(canvas, hazard);
+            }
+            drawCheckpoint(canvas, level);
+            drawGoal(canvas, level);
+            for (Pickup p : level.pickups) {
+                if (!p.taken) {
+                    drawPickup(canvas, p);
+                }
+            }
+            for (Enemy e : level.enemies) {
+                if (e.alive) {
+                    drawEnemy(canvas, e);
+                }
+            }
+            drawPlayer(canvas);
+        }
+
+        private void drawSky(Canvas canvas, float sw, float sh, int theme) {
+            int top = theme == 0 ? 0xFF3E5CCB : theme == 1 ? 0xFF31195F : 0xFF071421;
+            int bottom = theme == 0 ? 0xFFFFA55F : theme == 1 ? 0xFF1F8CA7 : 0xFF0E5B6F;
+            paint.setShader(new LinearGradient(0f, 0f, 0f, sh, top, bottom, Shader.TileMode.CLAMP));
             paint.setStyle(Paint.Style.FILL);
-            paint.setShader(new LinearGradient(0, 0, 0, h, 0xFF10172A, 0xFF03050B, Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, paint);
+            canvas.drawRect(0f, 0f, sw, sh, paint);
             paint.setShader(null);
+            paint.setColor(0x55FFFFFF);
+            canvas.drawCircle(sw * 0.80f, sh * 0.18f, 34f, paint);
+        }
 
-            paint.setColor(0xFF05070D);
+        private void drawBackdrop(Canvas canvas, Level level, float sh) {
+            float parallax = cameraX * 0.30f;
+            paint.setStyle(Paint.Style.FILL);
+            for (int i = -1; i < 9; i++) {
+                float base = i * 420f - parallax;
+                path.reset();
+                path.moveTo(base, sh * 0.78f);
+                path.lineTo(base + 180f, sh * 0.34f + (i % 2) * 42f);
+                path.lineTo(base + 420f, sh * 0.78f);
+                path.close();
+                paint.setColor(level.theme == 2 ? 0x9932D5FF : 0x88451478);
+                canvas.drawPath(path, paint);
+            }
+            paint.setColor(0x22000000);
+            for (int x = -400; x < level.width + 900; x += 120) {
+                canvas.drawLine(x, sh * 0.82f, x + 240f, sh, paint);
+                canvas.drawLine(x + 220f, sh * 0.82f, x - 40f, sh, paint);
+            }
+        }
+
+        private void drawPlatform(Canvas canvas, Platform p, int theme) {
+            int top = theme == 0 ? 0xFF36A66F : theme == 1 ? 0xFFB96C3B : 0xFF3959D8;
+            int side = theme == 0 ? 0xFF176449 : theme == 1 ? 0xFF6E3B2C : 0xFF1C2E8E;
+            rect.set(p.rect);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(side);
+            canvas.drawRect(rect.left, rect.top + 18f, rect.right, rect.bottom + 18f, paint);
+            paint.setColor(top);
+            canvas.drawRoundRect(rect, 8f, 8f, paint);
+            paint.setColor(0x88FFFFFF);
+            canvas.drawRect(rect.left, rect.top, rect.right, rect.top + 5f, paint);
+            paint.setColor(0x26000000);
+            for (float x = rect.left + 26f; x < rect.right; x += 56f) {
+                canvas.drawLine(x, rect.top + 8f, x + 20f, rect.bottom - 4f, paint);
+            }
+        }
+
+        private void drawHazard(Canvas canvas, RectF hazard) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xFFE94646);
+            for (float x = hazard.left; x < hazard.right; x += 34f) {
+                path.reset();
+                path.moveTo(x, hazard.bottom);
+                path.lineTo(x + 17f, hazard.top);
+                path.lineTo(x + 34f, hazard.bottom);
+                path.close();
+                canvas.drawPath(path, paint);
+            }
+        }
+
+        private void drawCheckpoint(Canvas canvas, Level level) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(checkpointX >= level.checkpointX ? 0xFFFFD45A : 0xFFEBF3FF);
+            canvas.drawRect(level.checkpointX, level.checkpointY + 4f, level.checkpointX + 8f, level.checkpointY + 96f, paint);
             path.reset();
-            path.moveTo(0, h * 0.60f);
-            path.lineTo(w, h * 0.50f);
-            path.lineTo(w, h);
-            path.lineTo(0, h);
+            path.moveTo(level.checkpointX + 8f, level.checkpointY + 8f);
+            path.lineTo(level.checkpointX + 74f, level.checkpointY + 24f);
+            path.lineTo(level.checkpointX + 8f, level.checkpointY + 44f);
             path.close();
             canvas.drawPath(path, paint);
+        }
 
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(Math.max(1f, w * 0.0014f));
-            paint.setColor(0x1932D5FF);
-            int panels = 7;
-            for (int i = 0; i <= panels; i++) {
-                float x = i * w / (float) panels;
-                canvas.drawLine(x, 0, x - w * 0.05f, h * 0.58f, paint);
-            }
-
-            paint.setStrokeWidth(Math.max(1f, w * 0.001f));
-            paint.setColor(0x17FFFFFF);
-            for (int i = 0; i < 12; i++) {
-                float y = h * 0.62f + i * h * 0.044f;
-                canvas.drawLine(-w * 0.08f, y, w * 1.08f, y + i * h * 0.012f, paint);
-            }
-            for (int i = -4; i <= 4; i++) {
-                float x = w * 0.50f + i * w * 0.11f;
-                canvas.drawLine(x, h * 0.58f, w * 0.50f + i * w * 0.26f, h, paint);
-            }
-
+        private void drawGoal(Canvas canvas, Level level) {
+            float pulse = (float) Math.sin(System.currentTimeMillis() / 220.0) * 8f;
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0x2A9C5CFF);
-            canvas.drawCircle(w * 0.18f, h * 0.20f, Math.max(80f, w * 0.16f), paint);
-            paint.setColor(0x2032D5FF);
-            canvas.drawCircle(w * 0.82f, h * 0.16f, Math.max(90f, w * 0.18f), paint);
-
-            float highlightX = -w * 0.30f + sweep * w * 1.6f;
-            paint.setShader(new LinearGradient(highlightX - w * 0.16f, 0, highlightX + w * 0.16f, h,
-                0x0032D5FF, 0x1832D5FF, Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, paint);
-            paint.setShader(null);
-
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(Math.max(2f, w * 0.004f));
-            paint.setColor(0x55FFC85A);
-            canvas.drawArc(-w * 0.18f, h * 0.04f, w * 1.18f, h * 0.82f, 205, 130, false, paint);
-            paint.setStrokeWidth(Math.max(1f, w * 0.002f));
-            paint.setColor(0x4432D5FF);
-            canvas.drawArc(w * 0.08f, h * 0.10f, w * 0.92f, h * 0.74f, 205, 130, false, paint);
-            postInvalidateOnAnimation();
-        }
-    }
-
-    private static final class CasinoTableView extends View {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Path path = new Path();
-        private final RectF table = new RectF();
-        private final RectF felt = new RectF();
-
-        CasinoTableView(Context context) {
-            super(context);
+            paint.setColor(0x5532D5FF);
+            canvas.drawCircle(level.goalX + 22f, level.goalY - 52f, 62f + pulse, paint);
+            paint.setColor(0xFFBFFFFF);
+            canvas.drawRoundRect(level.goalX, level.goalY - 110f, level.goalX + 48f, level.goalY + 6f, 24f, 24f, paint);
+            paint.setColor(0xFF1A1E54);
+            canvas.drawRoundRect(level.goalX + 10f, level.goalY - 92f, level.goalX + 38f, level.goalY - 16f, 14f, 14f, paint);
         }
 
-        @Override
-        protected void onDraw(Canvas canvas) {
-            int w = getWidth();
-            int h = getHeight();
-            long now = System.currentTimeMillis();
-            float pulse = (float) Math.sin((now % 4200L) / 4200f * Math.PI * 2f) * 0.5f + 0.5f;
-
-            table.set(w * 0.045f, h * 0.145f, w * 0.955f, h * 0.93f);
+        private void drawPickup(Canvas canvas, Pickup p) {
+            float spin = (float) Math.sin(System.currentTimeMillis() / 150.0 + p.x * 0.01f);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0xAA000000);
-            canvas.drawRoundRect(table.left + dp(10), table.top + dp(16), table.right + dp(10), table.bottom + dp(18), dp(90), dp(90), paint);
-            paint.setShader(new LinearGradient(table.left, table.top, table.right, table.bottom, 0xFF1A1026, 0xFF432719, Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(table, dp(96), dp(96), paint);
-            paint.setShader(null);
-
-            felt.set(table.left + dp(24), table.top + dp(24), table.right - dp(24), table.bottom - dp(24));
-            paint.setShader(new LinearGradient(0, felt.top, 0, felt.bottom, 0xFF0D4E58, 0xFF071D2A, Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(felt, dp(78), dp(78), paint);
-            paint.setShader(null);
-
-            drawTableTexture(canvas, w, h);
-            drawDealerBand(canvas, w, h, pulse);
-            drawSeatGrid(canvas, w, h);
-            drawCenterMark(canvas, w, h, pulse);
-            drawProps(canvas, w, h, now);
-
-            float sweepX = -w * 0.20f + (now % 5600L) / 5600f * w * 1.4f;
-            paint.setStyle(Paint.Style.FILL);
-            paint.setShader(new LinearGradient(sweepX - dp(90), 0, sweepX + dp(90), h, 0x00FFFFFF, 0x1432D5FF, Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(felt, dp(78), dp(78), paint);
-            paint.setShader(null);
-            postInvalidateOnAnimation();
-        }
-
-        private void drawTableTexture(Canvas canvas, int w, int h) {
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(5));
-            paint.setColor(0xD8FFC85A);
-            canvas.drawRoundRect(felt, dp(78), dp(78), paint);
-            paint.setStrokeWidth(dp(2));
-            paint.setColor(0x9932D5FF);
-            canvas.drawRoundRect(felt.left + dp(10), felt.top + dp(10), felt.right - dp(10), felt.bottom - dp(10), dp(68), dp(68), paint);
-            paint.setStrokeWidth(dp(1));
-            paint.setColor(0x12000000);
-            int step = Math.max(dp(18), w / 34);
-            for (int x = (int) felt.left - w; x < felt.right + w; x += step) {
-                canvas.drawLine(x, felt.top, x + h, felt.bottom, paint);
-                canvas.drawLine(x, felt.bottom, x + h, felt.top, paint);
-            }
-        }
-
-        private void drawDealerBand(Canvas canvas, int w, int h, float pulse) {
-            RectF arc = new RectF(felt.left + dp(70), felt.top + dp(18), felt.right - dp(70), felt.bottom + dp(176));
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(2));
-            paint.setColor(0x8832D5FF + ((int) (pulse * 42f) << 24));
-            canvas.drawArc(arc, 205, 130, false, paint);
-            paint.setStrokeWidth(dp(1));
-            paint.setColor(0x99FFC85A);
-            canvas.drawArc(new RectF(arc.left + dp(28), arc.top + dp(24), arc.right - dp(28), arc.bottom - dp(12)), 208, 124, false, paint);
-
-            paint.setStyle(Paint.Style.FILL);
-            paint.setTextAlign(Paint.Align.CENTER);
-            paint.setFakeBoldText(true);
-            paint.setColor(0xD9F8FBFF);
-            paint.setTextSize(Math.max(dp(12), w * 0.017f));
-            path.reset();
-            path.addArc(arc, 211, 118);
-            canvas.drawTextOnPath("BLACKJACK PAYS 3 TO 2", path, 0, -dp(12), paint);
-            paint.setColor(0xA8B8C5D6);
-            paint.setTextSize(Math.max(dp(9), w * 0.013f));
-            path.reset();
-            path.addArc(new RectF(arc.left + dp(52), arc.top + dp(42), arc.right - dp(52), arc.bottom - dp(26)), 213, 114);
-            canvas.drawTextOnPath("Dealer stands on soft 17", path, 0, -dp(6), paint);
-            paint.setFakeBoldText(false);
-        }
-
-        private void drawSeatGrid(Canvas canvas, int w, int h) {
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(2));
-            paint.setColor(0xA7F8FBFF);
-            drawSeat(canvas, w * 0.18f, h * 0.65f, w * 0.13f, h * 0.145f, -10f, "GUEST");
-            drawSeat(canvas, w * 0.34f, h * 0.78f, w * 0.14f, h * 0.15f, -4f, "HAND");
-            drawSeat(canvas, w * 0.50f, h * 0.82f, w * 0.15f, h * 0.15f, 0f, "PLAYER");
-            drawSeat(canvas, w * 0.66f, h * 0.78f, w * 0.14f, h * 0.15f, 4f, "HAND");
-            drawSeat(canvas, w * 0.82f, h * 0.65f, w * 0.13f, h * 0.145f, 10f, "GUEST");
-        }
-
-        private void drawSeat(Canvas canvas, float cx, float cy, float bw, float bh, float rotation, String label) {
-            canvas.save();
-            canvas.rotate(rotation, cx, cy);
-            RectF box = new RectF(cx - bw / 2f, cy - bh / 2f, cx + bw / 2f, cy + bh / 2f);
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0x17000000);
-            canvas.drawRoundRect(box.left + dp(4), box.top + dp(5), box.right + dp(4), box.bottom + dp(5), dp(12), dp(12), paint);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeWidth(dp(2));
-            paint.setColor(0x9FF8FBFF);
-            canvas.drawRoundRect(box, dp(12), dp(12), paint);
-            paint.setStrokeWidth(dp(1));
-            paint.setColor(0x6632D5FF);
-            canvas.drawRoundRect(box.left + dp(6), box.top + dp(6), box.right - dp(6), box.bottom - dp(6), dp(8), dp(8), paint);
-            paint.setStyle(Paint.Style.FILL);
-            paint.setTextAlign(Paint.Align.CENTER);
-            paint.setFakeBoldText(true);
-            paint.setTextSize(Math.max(dp(8), bw * 0.10f));
-            paint.setColor(0x72F8FBFF);
-            canvas.drawText(label, cx, cy + dp(4), paint);
-            paint.setFakeBoldText(false);
-            canvas.restore();
-        }
-
-        private void drawCenterMark(Canvas canvas, int w, int h, float pulse) {
-            paint.setStyle(Paint.Style.FILL);
-            paint.setTextAlign(Paint.Align.CENTER);
-            paint.setFakeBoldText(true);
-            paint.setColor(0x3032D5FF + ((int) (pulse * 28f) << 24));
-            paint.setTextSize(Math.max(dp(32), w * 0.052f));
-            canvas.drawText("21", w * 0.50f, h * 0.49f, paint);
-            paint.setColor(0xA8FFC85A);
-            paint.setTextSize(Math.max(dp(10), w * 0.014f));
-            canvas.drawText("ROYAL TABLE", w * 0.50f, h * 0.535f, paint);
-            paint.setFakeBoldText(false);
-        }
-
-        private void drawProps(Canvas canvas, int w, int h, long now) {
-            drawShoe(canvas, w, h);
-            drawDiscardPile(canvas, w, h);
-            float bob = (float) Math.sin((now % 1800L) / 1800f * Math.PI * 2f) * dp(1);
-            drawChipStack(canvas, w * 0.30f, h * 0.18f + bob, new int[] {0xFF0EA5E9, 0xFF7C3AED, 0xFFFFC85A, 0xFF0F172A});
-            drawChipStack(canvas, w * 0.14f, h * 0.83f - bob, new int[] {0xFFE5485E, 0xFFFFC85A, 0xFF2563EB, 0xFF0F172A});
-            drawChipStack(canvas, w * 0.50f, h * 0.875f + bob, new int[] {0xFF7C3AED, 0xFF0F172A, 0xFFFFC85A, 0xFF14B878});
-            drawChipStack(canvas, w * 0.86f, h * 0.82f - bob, new int[] {0xFFFFC85A, 0xFF32D5FF, 0xFFE5485E, 0xFF0F172A});
-        }
-
-        private void drawShoe(Canvas canvas, int w, int h) {
-            canvas.save();
-            canvas.rotate(-12f, w * 0.22f, h * 0.12f);
-            RectF shoe = new RectF(w * 0.15f, h * 0.04f, w * 0.29f, h * 0.155f);
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(0x88000000);
-            canvas.drawRoundRect(shoe.left + dp(7), shoe.top + dp(9), shoe.right + dp(7), shoe.bottom + dp(9), dp(12), dp(12), paint);
-            paint.setShader(new LinearGradient(shoe.left, shoe.top, shoe.right, shoe.bottom, 0xFF1E293B, 0xFF020617, Shader.TileMode.CLAMP));
-            canvas.drawRoundRect(shoe, dp(10), dp(10), paint);
-            paint.setShader(null);
-            paint.setColor(0xFFEFF6FF);
-            canvas.drawRoundRect(shoe.left + dp(10), shoe.top + dp(9), shoe.right - dp(24), shoe.bottom - dp(9), dp(5), dp(5), paint);
-            paint.setColor(0xFF32D5FF);
-            canvas.drawRoundRect(shoe.right - dp(46), shoe.top + dp(14), shoe.right - dp(8), shoe.bottom - dp(14), dp(5), dp(5), paint);
-            canvas.restore();
-        }
-
-        private void drawDiscardPile(Canvas canvas, int w, int h) {
-            canvas.save();
-            canvas.rotate(10f, w * 0.80f, h * 0.13f);
-            for (int i = 0; i < 4; i++) {
-                RectF card = new RectF(w * 0.765f + i * dp(10), h * 0.055f + i * dp(4), w * 0.835f + i * dp(10), h * 0.145f + i * dp(4));
-                paint.setStyle(Paint.Style.FILL);
-                paint.setColor(0x66000000);
-                canvas.drawRoundRect(card.left + dp(3), card.top + dp(4), card.right + dp(3), card.bottom + dp(4), dp(4), dp(4), paint);
-                paint.setColor(i % 2 == 0 ? 0xFF0EA5E9 : 0xFFE5485E);
-                canvas.drawRoundRect(card, dp(4), dp(4), paint);
+            if (p.gem) {
+                paint.setColor(0xFF9C5CFF);
+                path.reset();
+                path.moveTo(p.x, p.y - 23f);
+                path.lineTo(p.x + 23f, p.y);
+                path.lineTo(p.x, p.y + 23f);
+                path.lineTo(p.x - 23f, p.y);
+                path.close();
+                canvas.drawPath(path, paint);
+                paint.setColor(0xAAFFFFFF);
+                canvas.drawCircle(p.x - 6f, p.y - 6f, 5f, paint);
+            } else {
+                paint.setColor(0xFFFFD45A);
+                canvas.drawOval(p.x - 18f * Math.abs(spin), p.y - 20f, p.x + 18f * Math.abs(spin), p.y + 20f, paint);
+                paint.setColor(0xFF9E671A);
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeWidth(dp(1));
-                paint.setColor(0xCCF8FBFF);
-                canvas.drawRoundRect(card.left + dp(4), card.top + dp(4), card.right - dp(4), card.bottom - dp(4), dp(3), dp(3), paint);
-            }
-            canvas.restore();
-        }
-
-        private void drawChipStack(Canvas canvas, float x, float y, int[] colors) {
-            for (int i = 0; i < colors.length; i++) {
-                drawChip(canvas, x + (i % 2) * dp(22), y - i * dp(6), colors[i], i % 3 == 0 ? "100" : i % 3 == 1 ? "50" : "200");
+                paint.setStrokeWidth(3f);
+                canvas.drawOval(p.x - 12f * Math.abs(spin), p.y - 14f, p.x + 12f * Math.abs(spin), p.y + 14f, paint);
             }
         }
 
-        private void drawChip(Canvas canvas, float cx, float cy, int color, String label) {
-            float r = dp(14);
+        private void drawEnemy(Canvas canvas, Enemy e) {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(0x66000000);
-            canvas.drawCircle(cx + dp(3), cy + dp(4), r, paint);
-            paint.setShader(new LinearGradient(cx - r, cy - r, cx + r, cy + r, 0xFFFEF3C7, color, Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, r, paint);
-            paint.setShader(null);
+            canvas.drawOval(e.x + 4f, e.y + e.h - 4f, e.x + e.w - 4f, e.y + e.h + 12f, paint);
+            paint.setColor(0xFF202638);
+            canvas.drawRoundRect(e.x, e.y, e.x + e.w, e.y + e.h, 14f, 14f, paint);
+            paint.setColor(0xFF32D5FF);
+            canvas.drawCircle(e.x + 16f, e.y + 20f, 6f, paint);
+            canvas.drawCircle(e.x + e.w - 16f, e.y + 20f, 6f, paint);
+            paint.setColor(0xFFE5485E);
+            canvas.drawRect(e.x + 12f, e.y + e.h - 10f, e.x + e.w - 12f, e.y + e.h - 4f, paint);
+        }
+
+        private void drawPlayer(Canvas canvas) {
+            float x = playerX;
+            float y = playerY;
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0x66000000);
+            canvas.drawOval(x - 10f, y + playerHeight() - 4f, x + playerWidth() + 10f, y + playerHeight() + 14f, paint);
+            paint.setColor(0xFF101827);
+            canvas.drawRoundRect(x + 7f, y + 26f, x + 43f, y + 76f, 9f, 9f, paint);
+            paint.setColor(0xFFEBB87D);
+            canvas.drawRoundRect(x + 9f, y, x + 43f, y + 34f, 13f, 13f, paint);
+            paint.setColor(0xFF55341F);
+            canvas.drawRect(x + 8f, y, x + 44f, y + 13f, paint);
+            paint.setColor(0xFF32D5FF);
+            float eyeX = facingRight ? x + 33f : x + 18f;
+            canvas.drawCircle(eyeX, y + 18f, 4f, paint);
+            paint.setColor(0xFFFFD45A);
+            canvas.drawRect(x + 4f, y + 42f, x + 12f, y + 70f, paint);
+            canvas.drawRect(x + 38f, y + 42f, x + 48f, y + 70f, paint);
+            paint.setColor(0xFFEBF3FF);
+            canvas.drawRect(x + 9f, y + 76f, x + 22f, y + playerHeight(), paint);
+            canvas.drawRect(x + 28f, y + 76f, x + 43f, y + playerHeight(), paint);
+        }
+
+        private void drawHud(Canvas canvas) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xA4070A12);
+            canvas.drawRoundRect(dp(12), dp(10), getWidth() - dp(12), dp(58), dp(16), dp(16), paint);
+            paint.setColor(0xFFF8FBFF);
+            paint.setFakeBoldText(true);
+            paint.setTextSize(dp(17));
+            canvas.drawText("VELVET RUN 64", dp(28), dp(40), paint);
+            paint.setFakeBoldText(false);
+            paint.setTextSize(dp(14));
+            String hud = "L" + (levelIndex + 1) + "  " + currentLevel().name
+                + "   Coins " + coins
+                + "   Crystals " + gems
+                + "   Lives " + lives
+                + "   Time " + formatTime(runTime);
+            canvas.drawText(hud, dp(190), dp(40), paint);
+            paint.setFakeBoldText(true);
+            canvas.drawText("PAUSA", getWidth() - dp(84), dp(40), paint);
+            paint.setFakeBoldText(false);
+        }
+
+        private void drawControls(Canvas canvas) {
+            if (state != PLAYING) {
+                return;
+            }
+            float h = getHeight();
+            drawControlButton(canvas, dp(84), h - dp(82), "<", leftPressed);
+            drawControlButton(canvas, dp(194), h - dp(82), ">", rightPressed);
+            drawControlButton(canvas, getWidth() - dp(114), h - dp(82), "JUMP", jumpPressed);
+        }
+
+        private void drawControlButton(Canvas canvas, float cx, float cy, String label, boolean active) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(active ? 0xAA32D5FF : 0x55101826);
+            canvas.drawCircle(cx, cy, dp(label.length() > 1 ? 50 : 42), paint);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(2));
-            paint.setColor(0xFFFFFFFF);
-            canvas.drawCircle(cx, cy, r * 0.72f, paint);
-            paint.setStrokeWidth(dp(1));
-            paint.setColor(0xAA020617);
-            canvas.drawCircle(cx, cy, r * 0.42f, paint);
+            paint.setColor(0xCCF8FBFF);
+            canvas.drawCircle(cx, cy, dp(label.length() > 1 ? 50 : 42), paint);
             paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xFFF8FBFF);
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setFakeBoldText(true);
-            paint.setTextSize(dp(7));
-            paint.setColor(0xEEFFFFFF);
-            canvas.drawText(label, cx, cy + dp(3), paint);
+            paint.setTextSize(dp(label.length() > 1 ? 14 : 28));
+            canvas.drawText(label, cx, cy + dp(label.length() > 1 ? 5 : 10), paint);
+            paint.setTextAlign(Paint.Align.LEFT);
             paint.setFakeBoldText(false);
+        }
+
+        private void drawOverlay(Canvas canvas) {
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xC8050811);
+            canvas.drawRect(0f, 0f, getWidth(), getHeight(), paint);
+            paint.setTextAlign(Paint.Align.CENTER);
+            paint.setFakeBoldText(true);
+            paint.setColor(0xFFF8FBFF);
+            paint.setTextSize(dp(44));
+            String title;
+            String line1;
+            String line2;
+            if (state == MENU) {
+                title = "VELVET RUN 64";
+                line1 = "Tocca qui per partire";
+                line2 = "Tocca in basso per nuova partita";
+            } else if (state == PAUSED) {
+                title = "PAUSA";
+                line1 = "Tocca in alto per continuare";
+                line2 = "Tocca in basso per tornare al menu";
+            } else if (state == LEVEL_CLEAR) {
+                title = "LIVELLO COMPLETATO";
+                line1 = "Coins " + coins + "  Crystals " + gems;
+                line2 = "Tocca per il prossimo livello";
+            } else if (state == COMPLETED) {
+                title = "TOUR COMPLETATO";
+                line1 = "Score " + score + "  Best " + formatTime(bestTime);
+                line2 = "Tocca per ricominciare";
+            } else {
+                title = "GAME OVER";
+                line1 = "Score " + score;
+                line2 = "Tocca per riprovare";
+            }
+            canvas.drawText(title, getWidth() / 2f, getHeight() * 0.29f, paint);
+            paint.setTextSize(dp(20));
+            paint.setColor(0xFF32D5FF);
+            canvas.drawText(line1, getWidth() / 2f, getHeight() * 0.50f, paint);
+            paint.setColor(0xFFFFD45A);
+            canvas.drawText(line2, getWidth() / 2f, getHeight() * 0.66f, paint);
+            paint.setColor(0xFFB8C5D6);
+            paint.setTextSize(dp(14));
+            canvas.drawText("Retro 2.5D platformer - controlli touch: sinistra, destra, salto", getWidth() / 2f, getHeight() * 0.82f, paint);
+            paint.setTextAlign(Paint.Align.LEFT);
+            paint.setFakeBoldText(false);
+        }
+
+        private void drawToast(Canvas canvas) {
+            paint.setTextSize(dp(16));
+            paint.setFakeBoldText(true);
+            float width = paint.measureText(toast) + dp(34);
+            float left = (getWidth() - width) / 2f;
+            float top = dp(72);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xD8070A12);
+            canvas.drawRoundRect(left, top, left + width, top + dp(42), dp(16), dp(16), paint);
+            paint.setColor(0xFFF8FBFF);
+            paint.setTextAlign(Paint.Align.CENTER);
+            canvas.drawText(toast, getWidth() / 2f, top + dp(27), paint);
+            paint.setTextAlign(Paint.Align.LEFT);
+            paint.setFakeBoldText(false);
+        }
+
+        private void showToast(String text) {
+            toast = text;
+            toastTimer = 2.2f;
+        }
+
+        private float playerWidth() {
+            return 52f;
+        }
+
+        private float playerHeight() {
+            return 96f;
+        }
+
+        private RectF playerRect() {
+            return new RectF(playerX + 6f, playerY + 4f, playerX + playerWidth() - 6f, playerY + playerHeight());
+        }
+
+        private Level currentLevel() {
+            return levels.get(clampIndex(levelIndex));
+        }
+
+        private int clampIndex(int index) {
+            return Math.max(0, Math.min(levels.size() - 1, index));
+        }
+
+        private float scale() {
+            return Math.max(0.70f, getHeight() / 720f);
+        }
+
+        private float clamp(float value, float min, float max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
+        private String formatTime(float seconds) {
+            int total = (int) seconds;
+            return (total / 60) + ":" + (total % 60 < 10 ? "0" : "") + (total % 60);
         }
 
         private int dp(int value) {
             return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+        }
+
+        private void buildLevels() {
+            Level coast = new Level("Neon Coast", 0, 3700f, 110f, 430f, 1540f, 390f, 3460f, 468f);
+            coast.platform(0f, 560f, 760f, 90f);
+            coast.platform(860f, 505f, 300f, 70f);
+            coast.platform(1250f, 455f, 340f, 70f);
+            coast.platform(1720f, 540f, 680f, 90f);
+            coast.platform(2510f, 470f, 360f, 70f);
+            coast.platform(2990f, 535f, 620f, 90f);
+            coast.hazard(760f, 632f, 1120f, 676f);
+            coast.hazard(2420f, 612f, 2780f, 676f);
+            coast.enemy(1020f, 475f, 900f, 1140f);
+            coast.enemy(2050f, 510f, 1810f, 2350f);
+            coast.pickups(220f, 510f, false, 5, 80f);
+            coast.pickups(930f, 455f, false, 3, 70f);
+            coast.pickups(1320f, 405f, true, 1, 1f);
+            coast.pickups(1820f, 490f, false, 6, 70f);
+            coast.pickups(2580f, 420f, true, 1, 1f);
+            levels.add(coast);
+
+            Level skyline = new Level("Crystal Skyline", 1, 4300f, 100f, 430f, 2040f, 320f, 4040f, 388f);
+            skyline.platform(0f, 560f, 520f, 90f);
+            skyline.platform(650f, 490f, 260f, 70f);
+            skyline.platform(1060f, 410f, 280f, 70f);
+            skyline.platform(1510f, 345f, 330f, 70f);
+            skyline.platform(1950f, 445f, 430f, 70f);
+            skyline.platform(2530f, 520f, 520f, 90f);
+            skyline.platform(3200f, 450f, 280f, 70f);
+            skyline.platform(3710f, 455f, 520f, 90f);
+            skyline.hazard(520f, 630f, 760f, 676f);
+            skyline.hazard(1360f, 530f, 1560f, 676f);
+            skyline.hazard(3060f, 625f, 3450f, 676f);
+            skyline.enemy(715f, 460f, 665f, 875f);
+            skyline.enemy(2100f, 415f, 1980f, 2340f);
+            skyline.enemy(3330f, 420f, 3210f, 3460f);
+            skyline.pickups(690f, 440f, false, 4, 62f);
+            skyline.pickups(1120f, 360f, true, 1, 1f);
+            skyline.pickups(1570f, 295f, false, 5, 55f);
+            skyline.pickups(2600f, 470f, false, 6, 64f);
+            skyline.pickups(3245f, 400f, true, 1, 1f);
+            levels.add(skyline);
+
+            Level vault = new Level("Moon Vault", 2, 4700f, 100f, 430f, 2320f, 320f, 4420f, 368f);
+            vault.platform(0f, 560f, 480f, 90f);
+            vault.platform(650f, 510f, 260f, 70f);
+            vault.platform(1060f, 465f, 230f, 70f);
+            vault.platform(1450f, 410f, 270f, 70f);
+            vault.platform(1920f, 350f, 360f, 70f);
+            vault.platform(2460f, 470f, 560f, 90f);
+            vault.platform(3180f, 400f, 280f, 70f);
+            vault.platform(3620f, 345f, 280f, 70f);
+            vault.platform(4100f, 435f, 520f, 90f);
+            vault.hazard(480f, 630f, 720f, 676f);
+            vault.hazard(1300f, 560f, 1510f, 676f);
+            vault.hazard(2280f, 620f, 2600f, 676f);
+            vault.hazard(3460f, 560f, 3740f, 676f);
+            vault.enemy(760f, 480f, 670f, 880f);
+            vault.enemy(2050f, 320f, 1940f, 2240f);
+            vault.enemy(3340f, 370f, 3210f, 3440f);
+            vault.enemy(4320f, 405f, 4130f, 4570f);
+            vault.pickups(710f, 460f, false, 4, 55f);
+            vault.pickups(1100f, 415f, true, 1, 1f);
+            vault.pickups(1500f, 360f, false, 5, 55f);
+            vault.pickups(2020f, 300f, true, 1, 1f);
+            vault.pickups(2520f, 420f, false, 7, 65f);
+            vault.pickups(3650f, 300f, true, 1, 1f);
+            levels.add(vault);
+        }
+
+        private static final class Level {
+            final String name;
+            final int theme;
+            final float width;
+            final float startX;
+            final float startY;
+            final float checkpointX;
+            final float checkpointY;
+            final float goalX;
+            final float goalY;
+            final ArrayList<Platform> platforms = new ArrayList<Platform>();
+            final ArrayList<Pickup> pickups = new ArrayList<Pickup>();
+            final ArrayList<Enemy> enemies = new ArrayList<Enemy>();
+            final ArrayList<RectF> hazards = new ArrayList<RectF>();
+
+            Level(String name, int theme, float width, float startX, float startY, float checkpointX, float checkpointY, float goalX, float goalY) {
+                this.name = name;
+                this.theme = theme;
+                this.width = width;
+                this.startX = startX;
+                this.startY = startY;
+                this.checkpointX = checkpointX;
+                this.checkpointY = checkpointY;
+                this.goalX = goalX;
+                this.goalY = goalY;
+            }
+
+            void platform(float x, float y, float w, float h) {
+                platforms.add(new Platform(x, y, w, h));
+            }
+
+            void hazard(float l, float t, float r, float b) {
+                hazards.add(new RectF(l, t, r, b));
+            }
+
+            void enemy(float x, float y, float minX, float maxX) {
+                enemies.add(new Enemy(x, y, minX, maxX));
+            }
+
+            void pickups(float x, float y, boolean gem, int count, float gap) {
+                for (int i = 0; i < count; i++) {
+                    pickups.add(new Pickup(x + i * gap, y, gem));
+                }
+            }
+
+            void reset() {
+                for (int i = 0; i < pickups.size(); i++) {
+                    pickups.get(i).taken = false;
+                }
+                for (int i = 0; i < enemies.size(); i++) {
+                    enemies.get(i).reset();
+                }
+            }
+        }
+
+        private static final class Platform {
+            final RectF rect;
+
+            Platform(float x, float y, float w, float h) {
+                rect = new RectF(x, y, x + w, y + h);
+            }
+        }
+
+        private static final class Pickup {
+            final float x;
+            final float y;
+            final boolean gem;
+            boolean taken;
+
+            Pickup(float x, float y, boolean gem) {
+                this.x = x;
+                this.y = y;
+                this.gem = gem;
+            }
+        }
+
+        private static final class Enemy {
+            final float startX;
+            final float y;
+            final float minX;
+            final float maxX;
+            final float w = 58f;
+            final float h = 48f;
+            final float speed = 96f;
+            float x;
+            float dir = 1f;
+            boolean alive = true;
+
+            Enemy(float x, float y, float minX, float maxX) {
+                this.startX = x;
+                this.x = x;
+                this.y = y;
+                this.minX = minX;
+                this.maxX = maxX;
+            }
+
+            void reset() {
+                x = startX;
+                dir = 1f;
+                alive = true;
+            }
         }
     }
 }
